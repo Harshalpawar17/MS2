@@ -1,0 +1,7 @@
+{
+  "name": "MySage",
+  "description": "A production-ready healthcare workflow prototype supporting Eligibility Verification, Prior Authorization, Personal Injury, and Document Uploads with OCR and role-based access.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
