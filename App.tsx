@@ -18,6 +18,8 @@ import WCPIClaimsListingView from './views/WCPIClaimsListingView';
 import EVClaimListingView from './views/EVClaimListingView';
 import EVDetailPage from './views/EVDetailPage';
 import PatientDashboard from './views/PatientDashboard';
+import RuleEngine from './views/RuleEngine';
+import WorkflowEngineView from './views/WorkflowEngineView';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -67,6 +69,8 @@ const App: React.FC = () => {
           <Route path="ev-claims" element={<EVClaimListingView />} />
           <Route path="ev-claims/:id" element={<EVDetailPage />} />
           <Route path="admin/add-clinic" element={<AddClinicView />} />
+          <Route path="admin/rule-engine" element={<RuleEngine />} />
+          <Route path="admin/workflow-engine" element={<WorkflowEngineView />} />
         </Route>
         
         <Route path="*" element={<Navigate to="/" replace />} />

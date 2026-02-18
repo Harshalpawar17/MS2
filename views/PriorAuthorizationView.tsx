@@ -148,7 +148,7 @@ const PriorAuthorizationView: React.FC = () => {
                       <option>Select Category...</option>
                       <option>Diagnostic Services</option>
                       <option>DME / Supplies</option>
-                      <option>Outpatient Procedure</option>
+                      
                     </select>
                   </div>
                   <div className="space-y-2">

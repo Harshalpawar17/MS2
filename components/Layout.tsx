@@ -13,7 +13,8 @@ import {
   Scale,
   ShieldCheck,
   Bell,
-  FileText
+  FileText,
+  Gavel
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 
@@ -44,6 +45,8 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
     { to: '/claims', icon: <Scale size={20} />, label: 'Cases Listing' },
     { to: '/ev-claims', icon: <ShieldCheck size={20} />, label: 'EV Cases' },
     { to: '/intake', icon: <Settings size={20} />, label: 'Select Intake' },
+    { to: "/admin/rule-engine", icon: <Gavel size={20} />, label: "Rule Engine" },
+    { to: "/admin/workflow-engine", icon: <ClipboardList size={20} />, label: "Workflow Engine" },
   ];
 
   const agentLinks = [

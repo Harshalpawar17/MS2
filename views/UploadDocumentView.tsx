@@ -58,7 +58,7 @@ const UploadDocumentView: React.FC = () => {
             onChange={e => setCategory(e.target.value)}
             className="w-full px-6 py-5 bg-gray-50 border-2 border-transparent focus:border-primary rounded-[28px] outline-none font-bold text-primaryText transition-all text-xl appearance-none"
           >
-            <option value="">Select Classification...</option>
+            <option value="">Document Upload</option>
             <option>Credentialing Files</option>
             <option>Payer Correspondence</option>
             <option>Medical Records Request</option>
