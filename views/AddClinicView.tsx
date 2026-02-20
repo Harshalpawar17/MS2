@@ -92,6 +92,7 @@ const AddClinicView: React.FC = () => {
 
   // New code added for the Add new row function in the Payer Network Coverage Matrix
   type PayerMatrixRow = {
+    id: string;
     company: string;
     groupStatus: string;
     provider1Status: string;
@@ -100,6 +101,7 @@ const AddClinicView: React.FC = () => {
 
   const [payerMatrixRows, setPayerMatrixRows] = useState<PayerMatrixRow[]>(
     INITIAL_INSURANCE_LIST.slice(0, 10).map((company) => ({
+      id: crypto.randomUUID(),
       company,
       groupStatus: "",
       provider1Status: "",
@@ -110,7 +112,8 @@ const AddClinicView: React.FC = () => {
   const addPayerMatrixRow = () => {
     setPayerMatrixRows((prev) => [
       ...prev,
-      { company: "", groupStatus: "", provider1Status: "", provider2Status: "" },
+      // { company: "", groupStatus: "", provider1Status: "", provider2Status: "" },
+      { id: crypto.randomUUID(), company: "", groupStatus: "", provider1Status: "", provider2Status: "" },
     ]);
   };
 
@@ -261,7 +264,15 @@ const AddClinicView: React.FC = () => {
                   <td className="px-6 py-4 border-r border-gray-200 bg-white">
                    <span className="text-primaryText font-bold">Medicare Ptan</span>
                   </td>
-                  <td className="px-6 py-4 font-semibold text-secondary italic">Previous Clinic Address (if Applicable)</td>
+                  {/* <td className="px-6 py-4 font-semibold text-secondary italic">Previous Clinic Address (if Applicable)</td> */}
+                  <td className="px-6 py-4">
+                    <input
+                      value={(formData as any).previousClinicAddress || ""}
+                      onChange={(e) => setFormData({ ...formData, previousClinicAddress: e.target.value } as any)}
+                      placeholder="Previous Clinic Address (if applicable)"
+                      className="w-full bg-transparent border-none outline-none font-semibold text-secondary italic placeholder:text-secondary/60"
+                    />
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -324,11 +335,15 @@ const AddClinicView: React.FC = () => {
 
                 <tbody className="divide-y divide-gray-100">
                   {payerMatrixRows.map((row, idx) => (
-                    <tr key={`${row.company}-${idx}`} className="hover:bg-gray-50/50">
+                    <tr key={`${row.id}-${idx}`} className="hover:bg-gray-50/50">
+                    {/* <tr key={row.id} className="hover:bg-gray-50/50"></tr> */}
                       {/* Insurance Company (editable) */}
                       <td className="px-4 py-2 border-r border-gray-200">
                         <input
                           value={row.company}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
                           onChange={(e) => updatePayerMatrixRow(idx, "company", e.target.value)}
                           placeholder="Insurance Company"
                           className="w-full bg-transparent font-bold text-primaryText outline-none"
@@ -339,6 +354,8 @@ const AddClinicView: React.FC = () => {
                       <td className="px-2 py-1 border-r border-gray-200">
                         <select
                           value={row.groupStatus}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
                           onChange={(e) => updatePayerMatrixRow(idx, "groupStatus", e.target.value)}
                           className="w-full p-1 rounded border-none bg-transparent font-medium"
                         >
@@ -613,7 +630,7 @@ const AddClinicView: React.FC = () => {
             <section className="bg-white p-10 rounded-[40px] border border-gray-100 shadow-sm space-y-8">
               <h3 className="font-bold text-2xl text-primaryText flex items-center space-x-3">
                 <MapPin className="text-accent" size={24} />
-                <span>Fillable Address Information</span>
+                <span>Address Information</span>
               </h3>
               
               <div className="space-y-6">
@@ -642,7 +659,7 @@ const AddClinicView: React.FC = () => {
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-2xl text-primaryText flex items-center space-x-3">
                   <Users className="text-primary" size={24} />
-                  <span>Provider Roster</span>
+                  <span>Provider</span>
                 </h3>
                 <button onClick={addProvider} className="flex items-center space-x-2 text-primary hover:bg-primary/5 px-5 py-2.5 rounded-2xl transition-all font-bold text-sm border border-primary/20 bg-primary/[0.02]">
                   <Plus size={18} />
