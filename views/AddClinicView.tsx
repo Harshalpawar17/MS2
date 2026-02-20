@@ -90,6 +90,40 @@ const AddClinicView: React.FC = () => {
 
   const [formData, setFormData] = useState<Partial<Clinic>>(emptyFormData);
 
+  // New code added for the Add new row function in the Payer Network Coverage Matrix
+  type PayerMatrixRow = {
+    company: string;
+    groupStatus: string;
+    provider1Status: string;
+    provider2Status: string;
+  };
+
+  const [payerMatrixRows, setPayerMatrixRows] = useState<PayerMatrixRow[]>(
+    INITIAL_INSURANCE_LIST.slice(0, 10).map((company) => ({
+      company,
+      groupStatus: "",
+      provider1Status: "",
+      provider2Status: "",
+    }))
+  );
+
+  const addPayerMatrixRow = () => {
+    setPayerMatrixRows((prev) => [
+      ...prev,
+      { company: "", groupStatus: "", provider1Status: "", provider2Status: "" },
+    ]);
+  };
+
+  const updatePayerMatrixRow = (
+    index: number,
+    field: keyof PayerMatrixRow,
+    value: string
+  ) => {
+    setPayerMatrixRows((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
+    );
+  };
+
   const filteredClinics = useMemo(() => {
     return clinics.filter(clinic => {
       const matchesSearch = clinic.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -214,6 +248,7 @@ const AddClinicView: React.FC = () => {
                   <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">NPI: <span className="text-primaryText font-bold ml-2">{formData.npi || '—'}</span></td>
                   <td className="px-6 py-4 border-r border-gray-200">
                     <select className="w-full bg-yellow-50 p-2 rounded-lg border border-yellow-200 font-bold text-primaryText">
+                      <option>Select Network Status</option>
                       <option>In-Network</option>
                       <option>Out-of-Network</option>
                     </select>
@@ -222,16 +257,33 @@ const AddClinicView: React.FC = () => {
                 </tr>
                 <tr className="bg-white border-t border-gray-200">
                   <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">EIN: <span className="text-primaryText font-bold ml-2">{formData.taxId || '—'}</span></td>
-                  <td className="px-6 py-4 border-r border-gray-200 bg-gray-50"></td>
+                  {/* <td className="px-6 py-4 border-r border-gray-200 bg-gray-50"></td> */}
+                  <td className="px-6 py-4 border-r border-gray-200 bg-white">
+                   <span className="text-primaryText font-bold">Medicare Ptan</span>
+                  </td>
                   <td className="px-6 py-4 font-semibold text-secondary italic">Previous Clinic Address (if Applicable)</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div className="space-y-4">
+          {/* <div className="space-y-4">
             <h3 className="font-bold text-lg text-primaryText">Payer Network Coverage Matrix</h3>
-            <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm">
+            <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm"> */}
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-lg text-primaryText">Payer Network Coverage Matrix</h3>
+
+               <button
+                  onClick={addPayerMatrixRow}
+                  className="flex items-center space-x-1 text-primary font-bold text-sm bg-primary/5 px-3 py-1.5 rounded-xl border border-primary/20 hover:bg-primary/10 transition-all"
+                >
+                  <PlusCircle size={16} /> <span>Add Row</span>
+                </button>
+              </div>
+
+              <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm">
               <table className="w-full text-left text-xs">
                 <thead className="bg-gray-100 font-bold text-secondary">
                   <tr>
@@ -241,7 +293,7 @@ const AddClinicView: React.FC = () => {
                     <th className="px-4 py-3">Provider #2 - {formData.providers?.[1]?.fullName || 'N/A'}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                {/* <tbody className="divide-y divide-gray-100">
                   {INITIAL_INSURANCE_LIST.slice(0, 10).map((company) => (
                     <tr key={company} className="hover:bg-gray-50/50">
                       <td className="px-4 py-2 font-bold text-primaryText border-r border-gray-200">{company}</td>
@@ -268,7 +320,63 @@ const AddClinicView: React.FC = () => {
                       </td>
                     </tr>
                   ))}
+                </tbody> */}
+
+                <tbody className="divide-y divide-gray-100">
+                  {payerMatrixRows.map((row, idx) => (
+                    <tr key={`${row.company}-${idx}`} className="hover:bg-gray-50/50">
+                      {/* Insurance Company (editable) */}
+                      <td className="px-4 py-2 border-r border-gray-200">
+                        <input
+                          value={row.company}
+                          onChange={(e) => updatePayerMatrixRow(idx, "company", e.target.value)}
+                          placeholder="Insurance Company"
+                          className="w-full bg-transparent font-bold text-primaryText outline-none"
+                        />
+                      </td>
+
+                      {/* Group - Network Status */}
+                      <td className="px-2 py-1 border-r border-gray-200">
+                        <select
+                          value={row.groupStatus}
+                          onChange={(e) => updatePayerMatrixRow(idx, "groupStatus", e.target.value)}
+                          className="w-full p-1 rounded border-none bg-transparent font-medium"
+                        >
+                          <option value="">Select...</option>
+                          <option value="In-Network">In-Network</option>
+                          <option value="Out-of-Network">Out-of-Network</option>
+                        </select>
+                      </td>
+
+                      {/* Provider #1 */}
+                      <td className="px-2 py-1 border-r border-gray-200 bg-yellow-50/50">
+                        <select
+                          value={row.provider1Status}
+                          onChange={(e) => updatePayerMatrixRow(idx, "provider1Status", e.target.value)}
+                          className="w-full p-1 rounded border-none bg-transparent font-medium text-primary"
+                        >
+                          <option value="">Select...</option>
+                          <option value="In-Network">In-Network</option>
+                          <option value="Out-of-Network">Out-of-Network</option>
+                        </select>
+                      </td>
+
+                      {/* Provider #2 */}
+                      <td className="px-2 py-1">
+                        <select
+                          value={row.provider2Status}
+                          onChange={(e) => updatePayerMatrixRow(idx, "provider2Status", e.target.value)}
+                          className="w-full p-1 rounded border-none bg-transparent font-medium text-primary"
+                        >
+                          <option value="">Select...</option>
+                          <option value="In-Network">In-Network</option>
+                          <option value="Out-of-Network">Out-of-Network</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
+
               </table>
             </div>
           </div>
