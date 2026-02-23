@@ -652,9 +652,7 @@ const RuleEngine: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col space-y-2">
         <h1 className="text-3xl font-bold text-primaryText">Rule Engine</h1>
-        <p className="text-secondary font-medium">
-          Configure insurance-based rules to auto-update status and auto-fill benefit-check fields.
-        </p>
+        
       </div>
 
       {/* Tabs */}
