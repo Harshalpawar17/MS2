@@ -46,11 +46,11 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
 
   const adminLinks = [
     { to: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
+    { to: '/admin/add-clinic', icon: <Building2 size={20} />, label: 'Add Clinic' },
     { to: '/admin/users', icon: <Users size={20} />, label: 'User Management' },
     { to: '/admin/pods', icon: <LayoutIcon size={20} />, label: 'POD Management' },
-    { to: '/admin/add-clinic', icon: <Building2 size={20} />, label: 'Add Clinic' },
-    { to: '/claims', icon: <Scale size={20} />, label: 'Cases Listing' },
-    { to: '/ev-claims', icon: <ShieldCheck size={20} />, label: 'EV Cases' },
+    //{ to: '/claims', icon: <Scale size={20} />, label: 'Cases Listing' },
+    //{ to: '/ev-claims', icon: <ShieldCheck size={20} />, label: 'EV Cases' },
     { to: '/intake', icon: <Settings size={20} />, label: 'Select Intake' },
     { to: "/admin/rule-engine", icon: <Gavel size={20} />, label: "Rule Engine" },
     { to: "/admin/workflow-engine", icon: <ClipboardList size={20} />, label: "Workflow Engine" },

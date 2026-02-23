@@ -577,9 +577,9 @@ const UserManagement: React.FC = () => {
 
       {/* Create/Edit User Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 overflow-y-auto">
+        <div className="fixed inset-0 z-[60] flex items-start justify-center pt-8 pb-8 px-6">  
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
-          <div className="relative w-full max-w-4xl bg-white rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 my-8">
+          <div className="relative w-full max-w-4xl max-h-[calc(100svh-4rem)] overflow-y-auto bg-white rounded-[40px] shadow-2xl">
             <div className="p-8 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
               <h2 className="text-2xl font-bold text-gray-900">{selectedUser ? 'Edit User' : 'Create New User'}</h2>
               <button onClick={() => setIsModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-900 transition-all">
