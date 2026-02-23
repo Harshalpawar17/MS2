@@ -1,4 +1,4 @@
-
+// App.tsx
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { User, UserRole } from './types';
@@ -20,6 +20,8 @@ import EVDetailPage from './views/EVDetailPage';
 import PatientDashboard from './views/PatientDashboard';
 import RuleEngine from './views/RuleEngine';
 import WorkflowEngineView from './views/WorkflowEngineView';
+import UserManagement from './views/UserManagement';
+import PodManagement from './views/PodManagement';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -71,6 +73,8 @@ const App: React.FC = () => {
           <Route path="admin/add-clinic" element={<AddClinicView />} />
           <Route path="admin/rule-engine" element={<RuleEngine />} />
           <Route path="admin/workflow-engine" element={<WorkflowEngineView />} />
+          <Route path="admin/users" element={<UserManagement />} />
+          <Route path="admin/pods" element={<PodManagement />} />
         </Route>
         
         <Route path="*" element={<Navigate to="/" replace />} />

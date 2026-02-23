@@ -16,6 +16,20 @@ export interface User {
   name: string;
 }
 
+// Fixed: Added 'Authorized', 'Denied', 'Closed' to SubmissionStatus as they are used in the app
+export type SubmissionStatus = 
+  | 'Pending' 
+  | 'Completed' 
+  | 'Action Required' 
+  | 'New EV Received – Completed by Portal'
+  | 'Data Entry'
+  | 'Quality Control'
+  | 'Escalated to Account Management'
+  | 'Clinic Action Required'
+  | 'Authorized'
+  | 'Denied'
+  | 'Closed';
+
 export interface Submission {
   id: string;
   refNumber: string;
@@ -66,6 +80,7 @@ export interface Clinic {
   taxId: string;
   logo?: string;
   providers: Provider[];
+  medicarePtan: string;
   insuranceCredentials: InsuranceCredential[];
   systemAccess: SystemAccess[];
 }
@@ -109,4 +124,36 @@ export interface EVRecord {
     notes: string;
     related_policy_ids: string[];
   };
+}
+
+export interface Pod {
+  id: string;
+  name: string;
+  description: string;
+  ownerId: string;
+  clinicIds: string[];
+  userIds: string[];
+  status: 'Active' | 'Disabled' | 'Archived';
+  updatedAt: string;
+  createdAt: string;
+  organization?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface ManagedUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: UserRole;
+  department: string;
+  status: 'Active' | 'Disabled' | 'Archived';
+  lastLogin?: string;
+  organization?: string;
+  clinicIds?: string[];
+  providerId?: string;
+  podIds?: string[];
+  permissions: Record<string, 'None' | 'Read' | 'Write' | 'Admin'>;
+  title?: string;
+  phone?: string;
 }

@@ -78,15 +78,21 @@ type Condition = { id: string; field: ConditionField; op: Operator; value?: stri
 type GroupOp = "AND" | "OR";
 type ConditionGroup = { id: string; groupOp: GroupOp; items: Condition[] };
 
-type ActionType = "SET_STATUS" | "AUTOFILL_FIELDS" | "ASSIGN_USER" | "SEND_EMAIL";
+type ActionType = "SET_STATUS" | "AUTOFILL_FIELDS" | "ASSIGN_USER" | "SEND_EMAIL" | "SEND_FAX" | "EXPIRE" | "REQUEUE" | "API_CALL" | "GENERATE_PDF" | "REQUEUE_LIMIT_CHECK";
 
 type WorkflowAction =
-  | { id: string; type: "SET_STATUS"; payload: { statusToSet: string } }
-  | { id: string; type: "AUTOFILL_FIELDS"; payload: { fields: { key: string; value: string }[] } }
-  | { id: string; type: "ASSIGN_USER"; payload: { mode: "ROLE" | "USER"; value: string } }
-  | { id: string; type: "SEND_EMAIL"; payload: { templateId: string; to: "clinic" | "agent" | "qa" } };
+  | { id: string; type: "SET_STATUS"; payload: { dispositionId: string } }
+  | { id: string; type: "AUTOFILL_FIELDS"; payload: { fields: { key: string; op: "IS" | "IS_NOT" | "EXISTS"; value: string }[] } }
+  | { id: string; type: "ASSIGN_USER"; payload: { mode: "ROLE" | "DEPARTMENT" | "PERSON"; value: string } }
+  | { id: string; type: "SEND_EMAIL"; payload: { templateId: string; to: "clinic" | "agent" | "qa" } }
+  | { id: string; type: "SEND_FAX"; payload: { templateId: string; to: string } }
+  | { id: string; type: "EXPIRE"; payload: { days: number } }
+  | { id: string; type: "REQUEUE"; payload: { delayHours: number; delayMinutes: number; hiddenFromQueue: boolean } }
+  | { id: string; type: "API_CALL"; payload: { method: "GET" | "POST" | "PUT" | "DELETE"; url: string; headers: string; body: string } }
+  | { id: string; type: "GENERATE_PDF"; payload: { templateName: string; saveToDocuments: boolean } }
+  | { id: string; type: "REQUEUE_LIMIT_CHECK"; payload: { maxCount: number; routeToResult: string } };
 
-type NodeKind = "TRIGGER" | "ACTION" | "DECISION" | "END";
+type NodeKind = "TRIGGER" | "ACTION" | "DECISION" | "RESULTS" | "END";
 
 type EnrollmentConfig = {
   enabled: boolean;
@@ -186,10 +192,16 @@ function makeDefaultEnrollmentGroup(): ConditionGroup {
   return { id: uid(), groupOp: "AND", items: [{ id: uid(), field: "status", op: "EQUALS", value: "Pending Benefits" }] };
 }
 function summarizeAction(a: WorkflowAction) {
-  if (a.type === "SET_STATUS") return `Set Status → ${a.payload.statusToSet}`;
+  if (a.type === "SET_STATUS") return `Set Disposition → ${a.payload.dispositionId}`;
   if (a.type === "AUTOFILL_FIELDS") return `Autofill ${a.payload.fields.length} field(s)`;
   if (a.type === "ASSIGN_USER") return `Assign → ${a.payload.mode}:${a.payload.value}`;
   if (a.type === "SEND_EMAIL") return `Email → ${a.payload.to} (template: ${a.payload.templateId})`;
+  if (a.type === "SEND_FAX") return `Fax → ${a.payload.to}`;
+  if (a.type === "EXPIRE") return `Expire in ${a.payload.days} day(s)`;
+  if (a.type === "REQUEUE") return `Requeue ${a.payload.delayHours}h ${a.payload.delayMinutes}m`;
+  if (a.type === "API_CALL") return `API ${a.payload.method} → ${a.payload.url}`;
+  if (a.type === "GENERATE_PDF") return `Generate PDF: ${a.payload.templateName}`;
+  if (a.type === "REQUEUE_LIMIT_CHECK") return `Requeue limit ≥ ${a.payload.maxCount}`;
   return "Action";
 }
 
@@ -245,6 +257,7 @@ type HubNode = {
   kind: NodeKind;
   name: string;
   actions: WorkflowAction[];
+  results: string[]; // e.g. ["Approved", "Denied", "Pending"]
 };
 
 type HubEdge = {
@@ -254,7 +267,54 @@ type HubEdge = {
   priority: number; // lowest first
   label: string;
   conditionGroup: ConditionGroup | null; // IF has group with items; ELSE is null
+  resultLabel?: string; // which result from source node this edge represents
 };
+
+/** Template & Document types */
+type EmailTemplate = { id: string; name: string; subject: string; body: string };
+type FaxTemplate = { id: string; name: string; coverSheet: string };
+type DocRecord = { id: string; name: string; docType: string; createdAt: string };
+
+const MOCK_EMAIL_TEMPLATES: EmailTemplate[] = [
+  { id: "et-1", name: "Missing Insurance Card", subject: "Action Required: Insurance Card Needed", body: "Dear clinic, please provide..." },
+  { id: "et-2", name: "EV Completed Notification", subject: "Eligibility Verification Complete", body: "Your EV has been completed..." },
+  { id: "et-3", name: "PA Approval Notice", subject: "Prior Authorization Approved", body: "The PA for your patient..." },
+  { id: "et-4", name: "Benefits Summary", subject: "Benefits Verification Summary", body: "Please find attached..." },
+];
+
+const MOCK_FAX_TEMPLATES: FaxTemplate[] = [
+  { id: "ft-1", name: "PA Request Form", coverSheet: "Standard PA Cover" },
+  { id: "ft-2", name: "Insurance Verification Request", coverSheet: "IV Cover Sheet" },
+  { id: "ft-3", name: "Medical Records Request", coverSheet: "Records Cover" },
+];
+
+const MOCK_DOCUMENTS: DocRecord[] = [
+  { id: "doc-1", name: "Patient Insurance Card.pdf", docType: "Insurance", createdAt: "2025-12-01T10:00:00Z" },
+  { id: "doc-2", name: "EV Report #1042.pdf", docType: "EV Report", createdAt: "2025-12-05T14:30:00Z" },
+  { id: "doc-3", name: "PA Approval Letter.pdf", docType: "Authorization", createdAt: "2026-01-10T09:00:00Z" },
+];
+
+const SYSTEM_FIELDS = [
+  { key: "insurance_name", label: "Insurance Name" },
+  { key: "plan_type", label: "Plan Type" },
+  { key: "network_status", label: "Network Status" },
+  { key: "policy_id", label: "Policy ID" },
+  { key: "group_id", label: "Group ID" },
+  { key: "copay", label: "Copay" },
+  { key: "deductible", label: "Deductible" },
+  { key: "coinsurance", label: "Coinsurance" },
+  { key: "oop_max", label: "Out of Pocket Max" },
+  { key: "auth_number", label: "Auth Number" },
+  { key: "effective_date", label: "Effective Date" },
+  { key: "term_date", label: "Term Date" },
+  { key: "subscriber_id", label: "Subscriber ID" },
+  { key: "clinic_flag", label: "Clinic Flag" },
+  { key: "status", label: "Status" },
+];
+
+const DEPARTMENT_OPTIONS = ["Eligibility", "Authorization", "Billing", "QA", "Management", "Data Entry"];
+const ROLE_OPTIONS = ["Agent", "QA Reviewer", "Manager", "Admin", "Supervisor"];
+const PERSON_OPTIONS = ["John Smith", "Jane Doe", "Mike Chen", "Sarah Wilson"];
 
 function makeDefaultDefinition(): WorkflowDefinition {
   const trig = uid();
@@ -262,14 +322,15 @@ function makeDefaultDefinition(): WorkflowDefinition {
   const end = uid();
 
   const nodes: HubNode[] = [
-    { id: trig, kind: "TRIGGER", name: "Trigger: Enrollment", actions: [] },
+    { id: trig, kind: "TRIGGER", name: "Trigger: Enrollment", actions: [], results: [] },
     {
       id: act1,
       kind: "ACTION",
       name: "Action: Set Status",
-      actions: [{ id: uid(), type: "SET_STATUS", payload: { statusToSet: "Pending Benefits" } }],
+      actions: [{ id: uid(), type: "SET_STATUS", payload: { dispositionId: "" } }],
+      results: ["Completed", "Needs Review"],
     },
-    { id: end, kind: "END", name: "End", actions: [] },
+    { id: end, kind: "END", name: "End", actions: [], results: [] },
   ];
 
   const edges: HubEdge[] = [
@@ -320,7 +381,7 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
 
   for (const a of current.actions) {
     executed.push(a);
-    if (a.type === "SET_STATUS") finalStatus = a.payload.statusToSet;
+    if (a.type === "SET_STATUS") finalStatus = a.payload.dispositionId;
     if (a.type === "ASSIGN_USER") assignedTo = `${a.payload.mode}:${a.payload.value}`;
   }
 
@@ -371,7 +432,7 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
 
     for (const a of next.actions) {
       executed.push(a);
-      if (a.type === "SET_STATUS") finalStatus = a.payload.statusToSet;
+      if (a.type === "SET_STATUS") finalStatus = a.payload.dispositionId;
       if (a.type === "ASSIGN_USER") assignedTo = `${a.payload.mode}:${a.payload.value}`;
     }
 
@@ -587,12 +648,14 @@ function nodeBadge(kind: NodeKind) {
   if (kind === "TRIGGER") return "TRIGGER";
   if (kind === "DECISION") return "BRANCH";
   if (kind === "ACTION") return "ACTION";
+  if (kind === "RESULTS") return "RESULTS";
   return "END";
 }
 function nodeIcon(kind: NodeKind) {
   if (kind === "TRIGGER") return <Zap size={16} className="text-primary" />;
   if (kind === "DECISION") return <GitBranch size={16} className="text-primary" />;
   if (kind === "ACTION") return <WorkflowIcon size={16} className="text-primary" />;
+  if (kind === "RESULTS") return <BadgeCheck size={16} className="text-primary" />;
   return <CheckCircle2 size={16} className="text-primary" />;
 }
 
@@ -600,13 +663,13 @@ const HubNodeCard: React.FC<NodeProps<any>> = ({ data, selected }) => {
   const kind: NodeKind = data.kind;
   const title: string = data.name;
   const subtitle: string =
-    kind === "ACTION" ? `${(data.actions?.length || 0).toString()} action(s)` : kind === "DECISION" ? "IF / ELSE branches" : " ";
+    kind === "ACTION" ? `${(data.actions?.length || 0).toString()} action(s)` : kind === "DECISION" ? "IF / ELSE branches" : kind === "RESULTS" ? `${(data.results?.length || 0).toString()} outcome(s)` : " ";
+  const results: string[] = data.results || [];
 
   return (
     <div
-      className={`min-w-[220px] max-w-[260px] rounded-2xl border shadow-sm bg-white ${
-        selected ? "border-primary ring-2 ring-primary/20" : "border-gray-100"
-      }`}
+      className={`min-w-[220px] max-w-[260px] rounded-2xl border shadow-sm bg-white ${selected ? "border-primary ring-2 ring-primary/20" : "border-gray-100"
+        }`}
     >
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -615,8 +678,15 @@ const HubNodeCard: React.FC<NodeProps<any>> = ({ data, selected }) => {
         </div>
         <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">{nodeBadge(kind)}</span>
       </div>
-      <div className="px-4 py-3">
+      <div className="px-4 py-3 space-y-2">
         <div className="text-xs text-secondary font-medium">{subtitle}</div>
+        {results.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {results.map((r, i) => (
+              <span key={i} className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{r}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ReactFlow handles */}
@@ -642,22 +712,23 @@ const HubEdgeView: React.FC<EdgeProps<any>> = (props) => {
   const label = data?.label || "Next";
   const priority = data?.priority ?? 1;
   const isElse = data?.isElse ?? false;
+  const resultLabel = data?.resultLabel || "";
 
   const midX = (sourceX + targetX) / 2;
   const midY = (sourceY + targetY) / 2;
 
   const path = `M ${sourceX} ${sourceY} C ${sourceX + 80} ${sourceY} ${targetX - 80} ${targetY} ${targetX} ${targetY}`;
+  const displayLabel = resultLabel ? `${label} • ${resultLabel}` : `${label} • P${priority}`;
 
   return (
     <>
       <path id={id} d={path} fill="none" strokeWidth={2} stroke="#CBD5E1" markerEnd={markerEnd} />
-      <foreignObject x={midX - 70} y={midY - 18} width={140} height={36} requiredExtensions="http://www.w3.org/1999/xhtml">
+      <foreignObject x={midX - 80} y={midY - 18} width={160} height={36} requiredExtensions="http://www.w3.org/1999/xhtml">
         <div
-          className={`w-full h-full flex items-center justify-center rounded-full border text-[11px] font-bold ${
-            isElse ? "bg-gray-50 border-gray-200 text-secondary" : "bg-white border-gray-200 text-primaryText"
-          }`}
+          className={`w-full h-full flex items-center justify-center rounded-full border text-[11px] font-bold ${isElse ? "bg-gray-50 border-gray-200 text-secondary" : "bg-white border-gray-200 text-primaryText"
+            }`}
         >
-          {label} • P{priority}
+          {displayLabel}
         </div>
       </foreignObject>
     </>
@@ -724,7 +795,7 @@ type Disposition = {
   name: string;
   queue: string;
   enabled: boolean;
-  outcomeTag: string; 
+  outcomeTag: string;
 };
 
 const DEFAULT_DISPOSITIONS: Disposition[] = [
@@ -760,7 +831,7 @@ const DEFAULT_DISPOSITIONS: Disposition[] = [
   { id: uid(), code: 105, name: "Patient Requires New PA - Call", queue: "Authorizations", enabled: true, outcomeTag: "—" },
 ];
 
-type TopTabKey = "Queues" | "Dispositions" | "workflows" | "triggers" | "builder" | "test" | "audit";
+type TopTabKey = "Queues" | "Dispositions" | "workflows" | "triggers" | "builder" | "test" | "audit" | "emailTemplates" | "faxTemplates" | "documents";
 type DispositionTabKey = "triggers" | "builder" | "test" | "audit";
 
 type DispositionWorkflowState = {
@@ -802,6 +873,13 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
 
   // Audit logs (shared; includes workflowId so it's safe)
   const [auditLogs, setAuditLogs] = useState<WorkflowAuditLog[]>([]);
+
+  // Template & Document state
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(MOCK_EMAIL_TEMPLATES);
+  const [faxTemplates, setFaxTemplates] = useState<FaxTemplate[]>(MOCK_FAX_TEMPLATES);
+  const [documents] = useState<DocRecord[]>(MOCK_DOCUMENTS);
+  const [showAddEmailTemplate, setShowAddEmailTemplate] = useState(false);
+  const [showAddFaxTemplate, setShowAddFaxTemplate] = useState(false);
 
   // Disposition workflow mode (per disposition)
   const [dispMode, setDispMode] = useState<DispositionWorkflowState>({ open: false, dispositionId: null, tab: "builder" });
@@ -1121,6 +1199,9 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
       // { key: "workflows" as const, label: "Workflows", icon: <WorkflowIcon size={18} />, desc: "Create and manage workflows per account type" },
       // { key: "triggers" as const, label: "Triggers", icon: <Zap size={18} />, desc: "HubSpot-style enrollment rules (when records enter workflow)" },
       // { key: "builder" as const, label: "Builder", icon: <GitBranch size={18} />, desc: "Visual canvas: drag nodes, connect arrows, IF/ELSE branches" },
+      { key: "emailTemplates" as const, label: "Email Templates", icon: <FileDown size={18} />, desc: "Manage email templates used in workflow actions" },
+      { key: "faxTemplates" as const, label: "Fax Templates", icon: <FileDown size={18} />, desc: "Manage fax templates used in workflow actions" },
+      { key: "documents" as const, label: "Documents", icon: <ClipboardList size={18} />, desc: "Generated documents and file storage" },
       { key: "test" as const, label: "Test", icon: <PlayCircle size={18} />, desc: "Simulate execution: chosen path, actions, final status" },
       { key: "audit" as const, label: "Audit Logs", icon: <ClipboardList size={18} />, desc: "History per entity + export CSV" },
     ],
@@ -1149,9 +1230,8 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
                 </div>
                 <h1 className="text-2xl font-bold text-primaryText">{selectedDisposition.name}</h1>
                 <p className="text-sm text-secondary font-medium">
-                  Queue: <span className="font-bold text-primaryText">{selectedDisposition.queue}</span> • Code:{" "}
-                  <span className="font-bold text-primaryText">{selectedDisposition.code}</span> • Enabled:{" "}
-                  <span className="font-bold text-primaryText">{selectedDisposition.enabled ? "TRUE" : "FALSE"}</span>
+                  Queue: <span className="font-bold text-primaryText">{selectedDisposition.queue}</span> • Status:{" "}
+                  <span className="font-bold text-primaryText">{selectedDisposition.enabled ? "Active" : "Inactive"}</span>
                 </p>
                 {/* <p className="text-xs text-secondary">
                   This is the “all-in-one” workspace your manager wants: triggers + builder + test + audit for this single disposition.
@@ -1174,9 +1254,8 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
                   <button
                     key={k}
                     onClick={() => setDispMode((p) => ({ ...p, tab: k }))}
-                    className={`flex items-center space-x-2 px-4 py-3 rounded-2xl transition-all ${
-                      selected ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-gray-50 text-secondary hover:bg-gray-100 font-medium"
-                    }`}
+                    className={`flex items-center space-x-2 px-4 py-3 rounded-2xl transition-all ${selected ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-gray-50 text-secondary hover:bg-gray-100 font-medium"
+                      }`}
                   >
                     <span className={selected ? "text-white" : "text-primary"}>{icon}</span>
                     <span className="text-sm font-bold">{label}</span>
@@ -1192,7 +1271,7 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
           )}
 
           {dispMode.tab === "builder" && (
-            <BuilderCanvasSection workflow={selectedDispWorkflow} published={selectedDispPublished} onDraftChange={updateDispDraft} onPublish={publishDispNewVersion} />
+            <BuilderCanvasSection workflow={selectedDispWorkflow} published={selectedDispPublished} onDraftChange={updateDispDraft} onPublish={publishDispNewVersion} dispositions={dispositions} emailTemplates={emailTemplates} faxTemplates={faxTemplates} />
           )}
 
           {dispMode.tab === "test" && (
@@ -1239,11 +1318,10 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
                   disabled={disabled}
                   title={disabled ? "Select a queue first" : undefined}
                   onClick={() => !disabled && setActiveTab(t.key as TopTabKey)}
-                  className={`flex items-center space-x-2 px-4 py-3 rounded-2xl transition-all ${
-                    selected
-                      ? "bg-primary text-white shadow-lg shadow-primary/20"
-                      : "bg-gray-50 text-secondary hover:bg-gray-100 font-medium"
-                  } ${disabled ? "opacity-50 cursor-not-allowed hover:bg-gray-50" : ""}`}
+                  className={`flex items-center space-x-2 px-4 py-3 rounded-2xl transition-all ${selected
+                    ? "bg-primary text-white shadow-lg shadow-primary/20"
+                    : "bg-gray-50 text-secondary hover:bg-gray-100 font-medium"
+                    } ${disabled ? "opacity-50 cursor-not-allowed hover:bg-gray-50" : ""}`}
                 >
                   <span className={selected ? "text-white" : "text-primary"}>{t.icon}</span>
                   <span className="text-sm font-bold">{t.label}</span>
@@ -1280,7 +1358,7 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
             dispositions={filteredDispositions}
             queueOptions={queueOptions}
             queueValue={selectedQueue?.name || "—"}
-            onQueueChange={() => {}}
+            onQueueChange={() => { }}
             searchValue={dispositionSearch}
             onSearchChange={setDispositionSearch}
             onAdd={() => setShowAddDisposition(true)}
@@ -1307,7 +1385,7 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
         {activeTab === "triggers" && <TriggersSection workflow={selectedWorkflow} onGoWorkflows={() => setActiveTab("workflows")} onChange={updateEnrollment} />}
 
         {activeTab === "builder" && (
-          <BuilderCanvasSection workflow={selectedWorkflow} published={selectedPublished} onDraftChange={updateDraft} onPublish={publishNewVersion} />
+          <BuilderCanvasSection workflow={selectedWorkflow} published={selectedPublished} onDraftChange={updateDraft} onPublish={publishNewVersion} dispositions={dispositions} emailTemplates={emailTemplates} faxTemplates={faxTemplates} />
         )}
 
         {activeTab === "test" && (
@@ -1322,6 +1400,16 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
         )}
 
         {activeTab === "audit" && <AuditSection logs={auditLogs} onExport={exportAuditCsv} />}
+
+        {activeTab === "emailTemplates" && (
+          <EmailTemplatesSection templates={emailTemplates} onAdd={() => setShowAddEmailTemplate(true)} onDelete={(id) => setEmailTemplates((prev) => prev.filter((t) => t.id !== id))} />
+        )}
+
+        {activeTab === "faxTemplates" && (
+          <FaxTemplatesSection templates={faxTemplates} onAdd={() => setShowAddFaxTemplate(true)} onDelete={(id) => setFaxTemplates((prev) => prev.filter((t) => t.id !== id))} />
+        )}
+
+        {activeTab === "documents" && <DocumentsSection documents={documents} />}
 
         {/* Modals */}
         <Modal title="Add Workflow" open={showAddWorkflow} onClose={() => setShowAddWorkflow(false)}>
@@ -1349,11 +1437,25 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
           <AddDispositionForm
             onCancel={() => setShowAddDisposition(false)}
             onSave={(payload) => {
-              const newRow: Disposition = { id: uid(), ...payload };
+              const maxCode = dispositions.reduce((max, d) => Math.max(max, d.code), 0);
+              const newRow: Disposition = { id: uid(), code: maxCode + 1, ...payload };
               setDispositions((prev) => [newRow, ...prev]);
-              // auto-refresh queue dropdown if user had "All Queues"
               setShowAddDisposition(false);
             }}
+          />
+        </Modal>
+
+        <Modal title="Add Email Template" open={showAddEmailTemplate} onClose={() => setShowAddEmailTemplate(false)}>
+          <AddEmailTemplateForm
+            onCancel={() => setShowAddEmailTemplate(false)}
+            onSave={(t) => { setEmailTemplates((prev) => [t, ...prev]); setShowAddEmailTemplate(false); }}
+          />
+        </Modal>
+
+        <Modal title="Add Fax Template" open={showAddFaxTemplate} onClose={() => setShowAddFaxTemplate(false)}>
+          <AddFaxTemplateForm
+            onCancel={() => setShowAddFaxTemplate(false)}
+            onSave={(t) => { setFaxTemplates((prev) => [t, ...prev]); setShowAddFaxTemplate(false); }}
           />
         </Modal>
       </div>
@@ -1419,9 +1521,8 @@ const AddWorkflowForm: React.FC<{
         <button
           disabled={!canSave}
           onClick={() => onSave({ accountType, name: name.trim(), description: description.trim() })}
-          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${
-            canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
-          }`}
+          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            }`}
         >
           <Save size={18} />
           Save Workflow
@@ -1457,128 +1558,128 @@ const WorkflowsSection: React.FC<{
   onToggleActive,
   onMakeOnlyActive,
 }) => {
-  return (
-    <div className="bg-white border border-gray-100 rounded-[32px] p-8 space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-primaryText">Workflows</h2>
-          <p className="text-secondary text-sm font-medium">HubSpot pattern: choose workflow → configure triggers → build on canvas → publish → test → audit.</p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3">
-            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Account Type</p>
-            <select
-              value={selectedAccountType}
-              onChange={(e) => setSelectedAccountType(e.target.value as AccountType)}
-              className="bg-transparent outline-none w-[260px] text-sm text-primaryText"
-            >
-              {ACCOUNT_TYPE_OPTIONS.map((a) => (
-                <option key={a.code} value={a.code}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
+    return (
+      <div className="bg-white border border-gray-100 rounded-[32px] p-8 space-y-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-primaryText">Workflows</h2>
+            <p className="text-secondary text-sm font-medium">HubSpot pattern: choose workflow → configure triggers → build on canvas → publish → test → audit.</p>
           </div>
 
-          <div className="flex items-center bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 w-full sm:w-[360px]">
-            <Search size={18} className="text-secondary mr-2" />
-            <input
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search workflow name..."
-              className="bg-transparent outline-none w-full text-sm text-primaryText placeholder:text-secondary"
-            />
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3">
+              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Account Type</p>
+              <select
+                value={selectedAccountType}
+                onChange={(e) => setSelectedAccountType(e.target.value as AccountType)}
+                className="bg-transparent outline-none w-[260px] text-sm text-primaryText"
+              >
+                {ACCOUNT_TYPE_OPTIONS.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 w-full sm:w-[360px]">
+              <Search size={18} className="text-secondary mr-2" />
+              <input
+                value={search}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Search workflow name..."
+                className="bg-transparent outline-none w-full text-sm text-primaryText placeholder:text-secondary"
+              />
+            </div>
+
+            <button onClick={onAddWorkflow} className="flex items-center justify-center space-x-2 px-5 py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 hover:opacity-95 transition">
+              <Plus size={18} />
+              <span>Add Workflow</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="border border-gray-100 rounded-[24px] overflow-hidden">
+          <div className="grid grid-cols-12 gap-2 px-6 py-4 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide">
+            <div className="col-span-5">Workflow</div>
+            <div className="col-span-2">Published</div>
+            <div className="col-span-2">Updated</div>
+            <div className="col-span-3 text-right">Controls</div>
           </div>
 
-          <button onClick={onAddWorkflow} className="flex items-center justify-center space-x-2 px-5 py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 hover:opacity-95 transition">
-            <Plus size={18} />
-            <span>Add Workflow</span>
-          </button>
-        </div>
-      </div>
+          {workflows.length === 0 ? (
+            <div className="px-6 py-6 text-sm text-secondary">
+              No workflows yet. Click <span className="font-bold text-primaryText">Add Workflow</span>.
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {workflows.map((w) => {
+                const selected = selectedWorkflowId === w.id;
+                const latestVersion = w.versions.slice().sort((a, b) => b.version - a.version)[0]?.version ?? 1;
 
-      <div className="border border-gray-100 rounded-[24px] overflow-hidden">
-        <div className="grid grid-cols-12 gap-2 px-6 py-4 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide">
-          <div className="col-span-5">Workflow</div>
-          <div className="col-span-2">Published</div>
-          <div className="col-span-2">Updated</div>
-          <div className="col-span-3 text-right">Controls</div>
-        </div>
-
-        {workflows.length === 0 ? (
-          <div className="px-6 py-6 text-sm text-secondary">
-            No workflows yet. Click <span className="font-bold text-primaryText">Add Workflow</span>.
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {workflows.map((w) => {
-              const selected = selectedWorkflowId === w.id;
-              const latestVersion = w.versions.slice().sort((a, b) => b.version - a.version)[0]?.version ?? 1;
-
-              return (
-                <div
-                  key={w.id}
-                  className={`grid grid-cols-12 gap-2 px-6 py-4 items-center cursor-pointer transition ${selected ? "bg-primary/5" : "hover:bg-gray-50"}`}
-                  onClick={() => onSelectWorkflow(w.id)}
-                >
-                  <div className="col-span-5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-primaryText">{w.name}</span>
-                      {w.isActive ? (
-                        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary text-white">Active</span>
-                      ) : (
-                        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-200 text-secondary">Inactive</span>
-                      )}
-                      {selected && <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">Selected</span>}
+                return (
+                  <div
+                    key={w.id}
+                    className={`grid grid-cols-12 gap-2 px-6 py-4 items-center cursor-pointer transition ${selected ? "bg-primary/5" : "hover:bg-gray-50"}`}
+                    onClick={() => onSelectWorkflow(w.id)}
+                  >
+                    <div className="col-span-5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-primaryText">{w.name}</span>
+                        {w.isActive ? (
+                          <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary text-white">Active</span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-200 text-secondary">Inactive</span>
+                        )}
+                        {selected && <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">Selected</span>}
+                      </div>
+                      <div className="text-xs text-secondary mt-1">{w.description || "—"}</div>
                     </div>
-                    <div className="text-xs text-secondary mt-1">{w.description || "—"}</div>
-                  </div>
 
-                  <div className="col-span-2 text-sm font-bold text-primaryText">v{latestVersion}</div>
-                  <div className="col-span-2 text-xs text-secondary">{shortDate(w.updatedAt)}</div>
+                    <div className="col-span-2 text-sm font-bold text-primaryText">v{latestVersion}</div>
+                    <div className="col-span-2 text-xs text-secondary">{shortDate(w.updatedAt)}</div>
 
-                  <div className="col-span-3 flex justify-end gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleActive(w.id);
-                      }}
-                      className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
-                    >
-                      {w.isActive ? (
+                    <div className="col-span-3 flex justify-end gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleActive(w.id);
+                        }}
+                        className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
+                      >
+                        {w.isActive ? (
+                          <span className="inline-flex items-center gap-2">
+                            <ToggleLeft size={16} /> Set Inactive
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2">
+                            <ToggleRight size={16} className="text-primary" /> Set Active
+                          </span>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMakeOnlyActive(w.id);
+                        }}
+                        className="px-3 py-2 rounded-2xl bg-white border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
+                        title="Keep only one active workflow per Account Type"
+                      >
                         <span className="inline-flex items-center gap-2">
-                          <ToggleLeft size={16} /> Set Inactive
+                          <CheckCircle2 size={16} className="text-primary" /> Only Active
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-2">
-                          <ToggleRight size={16} className="text-primary" /> Set Active
-                        </span>
-                      )}
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMakeOnlyActive(w.id);
-                      }}
-                      className="px-3 py-2 rounded-2xl bg-white border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
-                      title="Keep only one active workflow per Account Type"
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <CheckCircle2 size={16} className="text-primary" /> Only Active
-                      </span>
-                    </button>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
 /** -----------------------------
  *  Triggers / Enrollment Section
@@ -1620,9 +1721,8 @@ const TriggersSection: React.FC<{
         <div className="flex flex-col sm:flex-row gap-3">
           <button
             onClick={() => onChange({ ...cfg, enabled: !cfg.enabled })}
-            className={`px-5 py-3 rounded-2xl font-bold inline-flex items-center gap-2 transition ${
-              cfg.enabled ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-50 border border-gray-100 text-secondary hover:bg-gray-100"
-            }`}
+            className={`px-5 py-3 rounded-2xl font-bold inline-flex items-center gap-2 transition ${cfg.enabled ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-50 border border-gray-100 text-secondary hover:bg-gray-100"
+              }`}
           >
             {cfg.enabled ? <BadgeCheck size={18} /> : <ToggleLeft size={18} />}
             {cfg.enabled ? "Enrollment Enabled" : "Enrollment Disabled"}
@@ -1671,6 +1771,160 @@ const TriggersSection: React.FC<{
 };
 
 /** -----------------------------
+ *  Email Templates Section
+ *  ----------------------------- */
+const EmailTemplatesSection: React.FC<{ templates: EmailTemplate[]; onAdd: () => void; onDelete: (id: string) => void }> = ({ templates, onAdd, onDelete }) => (
+  <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-4">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <FileDown size={20} className="text-primary" />
+        <h2 className="text-lg font-bold text-primaryText">Email Templates</h2>
+        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">{templates.length}</span>
+      </div>
+      <button onClick={onAdd} className="px-4 py-2.5 rounded-2xl bg-primary text-white font-bold hover:opacity-95 shadow-lg shadow-primary/20 transition text-sm inline-flex items-center gap-2">
+        <Plus size={16} /> Add Template
+      </button>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="border-b border-gray-100 text-left text-[10px] font-bold text-secondary uppercase tracking-wide">
+          <th className="py-3 px-4">Name</th><th className="py-3 px-4">Subject</th><th className="py-3 px-4">Body (preview)</th><th className="py-3 px-4 w-20">Actions</th>
+        </tr></thead>
+        <tbody>
+          {templates.map((t) => (
+            <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition">
+              <td className="py-3 px-4 font-bold text-primaryText">{t.name}</td>
+              <td className="py-3 px-4 text-secondary">{t.subject}</td>
+              <td className="py-3 px-4 text-secondary truncate max-w-[200px]">{t.body}</td>
+              <td className="py-3 px-4"><button onClick={() => onDelete(t.id)} className="p-2 rounded-xl hover:bg-red-50 text-secondary hover:text-red-500 transition"><Trash2 size={14} /></button></td>
+            </tr>
+          ))}
+          {templates.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-secondary">No email templates yet.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+/** -----------------------------
+ *  Fax Templates Section
+ *  ----------------------------- */
+const FaxTemplatesSection: React.FC<{ templates: FaxTemplate[]; onAdd: () => void; onDelete: (id: string) => void }> = ({ templates, onAdd, onDelete }) => (
+  <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-4">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <FileDown size={20} className="text-primary" />
+        <h2 className="text-lg font-bold text-primaryText">Fax Templates</h2>
+        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">{templates.length}</span>
+      </div>
+      <button onClick={onAdd} className="px-4 py-2.5 rounded-2xl bg-primary text-white font-bold hover:opacity-95 shadow-lg shadow-primary/20 transition text-sm inline-flex items-center gap-2">
+        <Plus size={16} /> Add Template
+      </button>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="border-b border-gray-100 text-left text-[10px] font-bold text-secondary uppercase tracking-wide">
+          <th className="py-3 px-4">Name</th><th className="py-3 px-4">Cover Sheet</th><th className="py-3 px-4 w-20">Actions</th>
+        </tr></thead>
+        <tbody>
+          {templates.map((t) => (
+            <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition">
+              <td className="py-3 px-4 font-bold text-primaryText">{t.name}</td>
+              <td className="py-3 px-4 text-secondary">{t.coverSheet}</td>
+              <td className="py-3 px-4"><button onClick={() => onDelete(t.id)} className="p-2 rounded-xl hover:bg-red-50 text-secondary hover:text-red-500 transition"><Trash2 size={14} /></button></td>
+            </tr>
+          ))}
+          {templates.length === 0 && <tr><td colSpan={3} className="py-8 text-center text-secondary">No fax templates yet.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+/** -----------------------------
+ *  Documents Section
+ *  ----------------------------- */
+const DocumentsSection: React.FC<{ documents: DocRecord[] }> = ({ documents }) => (
+  <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-4">
+    <div className="flex items-center gap-2">
+      <ClipboardList size={20} className="text-primary" />
+      <h2 className="text-lg font-bold text-primaryText">Documents</h2>
+      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">{documents.length}</span>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="border-b border-gray-100 text-left text-[10px] font-bold text-secondary uppercase tracking-wide">
+          <th className="py-3 px-4">Name</th><th className="py-3 px-4">Type</th><th className="py-3 px-4">Created</th>
+        </tr></thead>
+        <tbody>
+          {documents.map((d) => (
+            <tr key={d.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition">
+              <td className="py-3 px-4 font-bold text-primaryText">{d.name}</td>
+              <td className="py-3 px-4 text-secondary"><span className="px-2 py-0.5 rounded-full bg-gray-100 text-[10px] font-bold">{d.docType}</span></td>
+              <td className="py-3 px-4 text-secondary">{d.createdAt}</td>
+            </tr>
+          ))}
+          {documents.length === 0 && <tr><td colSpan={3} className="py-8 text-center text-secondary">No documents yet.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+/** -----------------------------
+ *  Add Email Template Form
+ *  ----------------------------- */
+const AddEmailTemplateForm: React.FC<{ onCancel: () => void; onSave: (t: EmailTemplate) => void }> = ({ onCancel, onSave }) => {
+  const [name, setName] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template Name</p>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full" placeholder="Welcome Email" />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Subject</p>
+        <input value={subject} onChange={(e) => setSubject(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full" placeholder="Your eligibility has been verified" />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Body</p>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full h-32" placeholder="Dear {{patient_name}},..." />
+      </div>
+      <div className="flex gap-2 pt-2">
+        <button onClick={onCancel} className="flex-1 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold transition">Cancel</button>
+        <button onClick={() => { if (!name.trim()) return; onSave({ id: uid(), name, subject, body }); }} className="flex-1 px-4 py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 transition">Save</button>
+      </div>
+    </div>
+  );
+};
+
+/** -----------------------------
+ *  Add Fax Template Form
+ *  ----------------------------- */
+const AddFaxTemplateForm: React.FC<{ onCancel: () => void; onSave: (t: FaxTemplate) => void }> = ({ onCancel, onSave }) => {
+  const [name, setName] = useState("");
+  const [coverSheet, setCoverSheet] = useState("");
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template Name</p>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full" placeholder="PA Fax Cover" />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Cover Sheet Text</p>
+        <textarea value={coverSheet} onChange={(e) => setCoverSheet(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full h-32" placeholder="CONFIDENTIAL: Prior Authorization request for..." />
+      </div>
+      <div className="flex gap-2 pt-2">
+        <button onClick={onCancel} className="flex-1 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold transition">Cancel</button>
+        <button onClick={() => { if (!name.trim()) return; onSave({ id: uid(), name, coverSheet }); }} className="flex-1 px-4 py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 transition">Save</button>
+      </div>
+    </div>
+  );
+};
+
+/** -----------------------------
  *  Builder Canvas Section
  *  ----------------------------- */
 const BuilderCanvasSection: React.FC<{
@@ -1678,11 +1932,15 @@ const BuilderCanvasSection: React.FC<{
   published: WorkflowVersion | null;
   onDraftChange: (def: WorkflowDefinition) => void;
   onPublish: () => void;
-}> = ({ workflow, published, onDraftChange, onPublish }) => {
+  dispositions: Disposition[];
+  emailTemplates: EmailTemplate[];
+  faxTemplates: FaxTemplate[];
+}> = ({ workflow, published, onDraftChange, onPublish, dispositions, emailTemplates, faxTemplates }) => {
   const rf = useRef<ReactFlowInstance | null>(null);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
 
   if (!workflow) {
     return (
@@ -1757,12 +2015,14 @@ const BuilderCanvasSection: React.FC<{
       kind === "TRIGGER"
         ? "Trigger: Enrollment"
         : kind === "DECISION"
-        ? "Decision: IF / ELSE"
-        : kind === "ACTION"
-        ? "Action: New Step"
-        : "End";
+          ? "Decision: IF / ELSE"
+          : kind === "ACTION"
+            ? "Action: New Step"
+            : kind === "RESULTS"
+              ? "Results: Outcomes"
+              : "End";
 
-    const newHubNode: HubNode = { id, kind, name, actions: [] };
+    const newHubNode: HubNode = { id, kind, name, actions: [], results: [] };
     const newFlowNode: Node = { id, type: "hubNode", position: rf.current ? rf.current.project({ x: 180, y: 120 }) : { x: 180, y: 120 }, data: { ...newHubNode } };
 
     setNodes((p) => [...p, newFlowNode]);
@@ -1821,11 +2081,11 @@ const BuilderCanvasSection: React.FC<{
     const next = def.edges.map((e) =>
       e.id === selectedEdge.id
         ? {
-            ...e,
-            label: e.label?.startsWith("ELSE") ? "IF" : e.label || "IF",
-            priority: Math.max(1, e.priority || 1),
-            conditionGroup: e.conditionGroup && e.conditionGroup.items.length ? e.conditionGroup : makeEmptyGroup(),
-          }
+          ...e,
+          label: e.label?.startsWith("ELSE") ? "IF" : e.label || "IF",
+          priority: Math.max(1, e.priority || 1),
+          conditionGroup: e.conditionGroup && e.conditionGroup.items.length ? e.conditionGroup : makeEmptyGroup(),
+        }
         : e
     );
     onDraftChange({ ...def, edges: next });
@@ -1848,14 +2108,19 @@ const BuilderCanvasSection: React.FC<{
   };
 
   const addActionToNode = (nodeId: string, type: ActionType) => {
-    const action: WorkflowAction =
-      type === "SET_STATUS"
-        ? { id: uid(), type: "SET_STATUS", payload: { statusToSet: "Need More Info" } }
-        : type === "AUTOFILL_FIELDS"
-        ? { id: uid(), type: "AUTOFILL_FIELDS", payload: { fields: [{ key: "copay", value: "20" }] } }
-        : type === "ASSIGN_USER"
-        ? { id: uid(), type: "ASSIGN_USER", payload: { mode: "ROLE", value: "QA" } }
-        : { id: uid(), type: "SEND_EMAIL", payload: { templateId: "TEMPLATE-001", to: "qa" } };
+    const defaults: Record<ActionType, () => WorkflowAction> = {
+      SET_STATUS: () => ({ id: uid(), type: "SET_STATUS", payload: { dispositionId: "" } }),
+      AUTOFILL_FIELDS: () => ({ id: uid(), type: "AUTOFILL_FIELDS", payload: { fields: [{ key: "copay", op: "IS" as const, value: "" }] } }),
+      ASSIGN_USER: () => ({ id: uid(), type: "ASSIGN_USER", payload: { mode: "ROLE", value: "" } }),
+      SEND_EMAIL: () => ({ id: uid(), type: "SEND_EMAIL", payload: { templateId: "", to: "qa" } }),
+      SEND_FAX: () => ({ id: uid(), type: "SEND_FAX", payload: { templateId: "", to: "" } }),
+      EXPIRE: () => ({ id: uid(), type: "EXPIRE", payload: { days: 30 } }),
+      REQUEUE: () => ({ id: uid(), type: "REQUEUE", payload: { delayHours: 1, delayMinutes: 0, hiddenFromQueue: false } }),
+      API_CALL: () => ({ id: uid(), type: "API_CALL", payload: { method: "GET", url: "", headers: "", body: "" } }),
+      GENERATE_PDF: () => ({ id: uid(), type: "GENERATE_PDF", payload: { templateName: "", saveToDocuments: true } }),
+      REQUEUE_LIMIT_CHECK: () => ({ id: uid(), type: "REQUEUE_LIMIT_CHECK", payload: { maxCount: 3, routeToResult: "" } }),
+    };
+    const action = defaults[type]();
 
     onDraftChange({ ...def, nodes: def.nodes.map((n) => (n.id === nodeId ? { ...n, actions: [action, ...n.actions] } : n)) });
     setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data as any), actions: [action, ...((n.data as any)?.actions || [])] } } : n)));
@@ -1876,14 +2141,14 @@ const BuilderCanvasSection: React.FC<{
       prev.map((e) =>
         e.id === edgeId
           ? {
-              ...e,
-              data: {
-                ...(e.data as any),
-                label: patch.label ?? (e.data as any)?.label,
-                priority: patch.priority ?? (e.data as any)?.priority,
-                isElse: patch.conditionGroup ? (patch.conditionGroup.items?.length ?? 0) === 0 : patch.conditionGroup === null,
-              },
-            }
+            ...e,
+            data: {
+              ...(e.data as any),
+              label: patch.label ?? (e.data as any)?.label,
+              priority: patch.priority ?? (e.data as any)?.priority,
+              isElse: patch.conditionGroup ? (patch.conditionGroup.items?.length ?? 0) === 0 : patch.conditionGroup === null,
+            },
+          }
           : e
       )
     );
@@ -1904,7 +2169,8 @@ const BuilderCanvasSection: React.FC<{
   }, []);
 
   return (
-    <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-6">
+    <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-4">
+      {/* Header row */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-primaryText">Builder (Visual Canvas)</h2>
@@ -1912,25 +2178,16 @@ const BuilderCanvasSection: React.FC<{
             Editing Draft: <span className="font-bold text-primaryText">{workflow.name}</span>{" "}
             <span className="text-xs text-secondary">(Published v{publishedVersion})</span>
           </p>
-          <p className="text-xs text-secondary mt-2">Branch rules are on arrows: IF uses conditions; ELSE is default. IF evaluation uses priority (low first).</p>
+          <p className="text-xs text-secondary mt-1">Branch rules are on arrows: IF uses conditions; ELSE is default. IF evaluation uses priority (low first).</p>
         </div>
-
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button
-            onClick={() => {
-              if (validationError) return;
-              onPublish();
-            }}
-            disabled={!!validationError}
-            className={`px-5 py-3 rounded-2xl font-bold inline-flex items-center gap-2 transition ${
-              validationError ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-white border border-gray-100 text-secondary hover:bg-gray-100"
-            }`}
-            title={validationError || "Publish draft as a new version"}
-          >
-            <UploadCloud size={18} />
-            Publish New Version
-          </button>
-        </div>
+        <button
+          onClick={() => { if (validationError) return; onPublish(); }}
+          disabled={!!validationError}
+          className={`px-5 py-3 rounded-2xl font-bold inline-flex items-center gap-2 transition shrink-0 ${validationError ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-white border border-gray-100 text-secondary hover:bg-gray-100"}`}
+          title={validationError || "Publish draft as a new version"}
+        >
+          <UploadCloud size={18} /> Publish New Version
+        </button>
       </div>
 
       {validationError && (
@@ -1939,353 +2196,464 @@ const BuilderCanvasSection: React.FC<{
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* Left Palette */}
-        <div className="xl:col-span-3 border border-gray-100 rounded-[24px] overflow-hidden">
-          <div className="px-5 py-4 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide flex items-center gap-2">
-            <Settings2 size={16} /> Actions & Blocks
+      {/* Horizontal Toolbar */}
+      <div className="border border-gray-100 rounded-2xl bg-gray-50 px-4 py-3 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-bold text-secondary uppercase tracking-wide mr-1">Blocks:</span>
+        <button onClick={() => addNodeBlock("TRIGGER")} className="px-3 py-2 rounded-xl bg-primary text-white font-bold shadow-sm shadow-primary/20 hover:opacity-95 transition inline-flex items-center gap-1.5 text-xs">
+          <Zap size={14} /> Trigger
+        </button>
+        <button onClick={() => addNodeBlock("ACTION")} className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-1.5 text-xs">
+          <WorkflowIcon size={14} className="text-primary" /> Action
+        </button>
+        <button onClick={() => addNodeBlock("DECISION")} className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-1.5 text-xs">
+          <GitBranch size={14} className="text-primary" /> Decision
+        </button>
+        <button onClick={() => addNodeBlock("RESULTS")} className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-1.5 text-xs">
+          <BadgeCheck size={14} className="text-primary" /> Results
+        </button>
+        <button onClick={() => addNodeBlock("END")} className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-1.5 text-xs">
+          <CheckCircle2 size={14} className="text-primary" /> End
+        </button>
+
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+
+        <button onClick={duplicateSelectedNode} disabled={!selectedNode} title="Duplicate Node"
+          className={`px-3 py-2 rounded-xl font-bold inline-flex items-center gap-1.5 transition text-xs ${selectedNode ? "bg-white border border-gray-200 text-secondary hover:bg-gray-100" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}>
+          <Copy size={14} /> Duplicate
+        </button>
+        <button onClick={removeSelected} disabled={!selectedNodeId && !selectedEdgeId} title="Delete Selected"
+          className={`px-3 py-2 rounded-xl font-bold inline-flex items-center gap-1.5 transition text-xs ${selectedNodeId || selectedEdgeId ? "bg-white border border-gray-200 text-secondary hover:bg-gray-100" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}>
+          <Trash2 size={14} /> Delete
+        </button>
+
+        <div className="flex-1" />
+
+        <button onClick={() => setPropertiesOpen((p) => !p)}
+          className={`px-3 py-2 rounded-xl font-bold inline-flex items-center gap-1.5 transition text-xs ${propertiesOpen ? "bg-primary text-white shadow-sm shadow-primary/20" : "bg-white border border-gray-200 text-secondary hover:bg-gray-100"}`}>
+          <Settings2 size={14} /> Properties
+        </button>
+      </div>
+
+      {/* Full-width Canvas */}
+      <div className="border border-gray-100 rounded-[24px] overflow-hidden">
+        <div className="px-5 py-3 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide flex items-center justify-between">
+          <div className="inline-flex items-center gap-2">
+            <GitBranch size={16} /> Canvas
           </div>
-
-          <div className="p-5 space-y-4">
-            <div className="text-xs text-secondary">Click to add blocks. Then connect arrows on canvas.</div>
-
-            <div className="grid grid-cols-1 gap-2">
-              <button onClick={() => addNodeBlock("TRIGGER")} className="px-4 py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 hover:opacity-95 transition inline-flex items-center gap-2">
-                <Zap size={16} /> Add Trigger
-              </button>
-              <button onClick={() => addNodeBlock("ACTION")} className="px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-2">
-                <WorkflowIcon size={16} className="text-primary" /> Add Action Step
-              </button>
-              <button onClick={() => addNodeBlock("DECISION")} className="px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-2">
-                <GitBranch size={16} className="text-primary" /> Add Decision (IF/ELSE)
-              </button>
-              <button onClick={() => addNodeBlock("END")} className="px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-primary" /> Add End
-              </button>
-            </div>
-
-            <div className="border-t border-gray-100 pt-4 space-y-2">
-              <div className="text-xs font-bold text-secondary uppercase tracking-wide">Quick Controls</div>
-              <button
-                onClick={duplicateSelectedNode}
-                disabled={!selectedNode}
-                className={`w-full px-4 py-3 rounded-2xl font-bold inline-flex items-center justify-center gap-2 transition ${
-                  selectedNode ? "bg-white border border-gray-100 text-secondary hover:bg-gray-100" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                }`}
-              >
-                <Copy size={16} /> Duplicate Node
-              </button>
-
-              <button
-                onClick={removeSelected}
-                disabled={!selectedNodeId && !selectedEdgeId}
-                className={`w-full px-4 py-3 rounded-2xl font-bold inline-flex items-center justify-center gap-2 transition ${
-                  selectedNodeId || selectedEdgeId ? "bg-white border border-gray-100 text-secondary hover:bg-gray-100" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                }`}
-              >
-                <Trash2 size={16} /> Delete Selected
-              </button>
-            </div>
-
-            <div className="text-[11px] text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
-              <span className="font-bold text-primaryText">HubSpot parity:</span> left action palette + visual flow with branches and conditions on arrows.
-            </div>
+          <div className="text-[11px] text-secondary font-medium inline-flex items-center gap-2">
+            <ArrowRight size={14} /> Connect nodes to create branches
           </div>
         </div>
-
-        {/* Center Canvas */}
-        <div className="xl:col-span-6 border border-gray-100 rounded-[24px] overflow-hidden">
-          <div className="px-5 py-4 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide flex items-center justify-between">
-            <div className="inline-flex items-center gap-2">
-              <GitBranch size={16} /> Canvas
-            </div>
-            <div className="text-[11px] text-secondary font-medium inline-flex items-center gap-2">
-              <span className="inline-flex items-center gap-1">
-                <ArrowRight size={14} /> Connect nodes to create branches
-              </span>
-            </div>
-          </div>
-
-          <div className="h-[640px]">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              onInit={(instance) => (rf.current = instance)}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onSelectionChange={onSelectionChange}
-              onNodeDragStop={onNodeDragStop}
-              fitView
-            >
-              <Background gap={18} />
-              <MiniMap pannable zoomable />
-              <Controls />
-            </ReactFlow>
-          </div>
+        <div style={{ height: "calc(100vh - 340px)", minHeight: "420px" }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onInit={(instance) => (rf.current = instance)}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onSelectionChange={onSelectionChange}
+            onNodeDragStop={onNodeDragStop}
+            fitView
+          >
+            <Background gap={18} />
+            <MiniMap pannable zoomable />
+            <Controls />
+          </ReactFlow>
         </div>
+      </div>
 
-        {/* Right Properties */}
-        <div className="xl:col-span-3 border border-gray-100 rounded-[24px] overflow-hidden">
-          <div className="px-5 py-4 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide flex items-center gap-2">
-            <Settings2 size={16} /> Properties
-          </div>
-
-          <div className="p-5 space-y-5">
-            {!selectedNode && !selectedEdge ? (
-              <div className="text-sm text-secondary">
-                Select a <span className="font-bold text-primaryText">Node</span> to edit actions, or select an{" "}
-                <span className="font-bold text-primaryText">Arrow</span> to edit IF/ELSE branch conditions.
+      {/* Properties Drawer (slide-in from right) */}
+      {propertiesOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setPropertiesOpen(false)} />
+          <div className="fixed top-0 right-0 h-full z-50 w-full max-w-[420px] bg-white border-l border-gray-200 shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10">
+              <div className="flex items-center gap-2 text-xs font-bold text-secondary uppercase tracking-wide">
+                <Settings2 size={16} /> Properties
               </div>
-            ) : null}
+              <button onClick={() => setPropertiesOpen(false)} className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">✕ Close</button>
+            </div>
 
-            {selectedNode && (
-              <div className="space-y-4">
-                <div className="border border-gray-100 rounded-2xl p-4 bg-white space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-bold text-primaryText">Node</div>
-                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">{nodeBadge(selectedNode.kind)}</span>
-                  </div>
-
-                  <div>
-                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Name</p>
-                    <input
-                      value={selectedNode.name}
-                      onChange={(e) => updateNodeName(selectedNode.id, e.target.value)}
-                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                    />
-                  </div>
-
-                  {selectedNode.kind === "ACTION" && (
-                    <div className="pt-2 border-t border-gray-100">
-                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-2">Actions</p>
-
-                      <div className="flex flex-wrap gap-2 mb-3">
-                        <button onClick={() => addActionToNode(selectedNode.id, "SET_STATUS")} className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                          + Status
-                        </button>
-                        <button onClick={() => addActionToNode(selectedNode.id, "AUTOFILL_FIELDS")} className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                          + Autofill
-                        </button>
-                        <button onClick={() => addActionToNode(selectedNode.id, "ASSIGN_USER")} className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                          + Assign
-                        </button>
-                        <button onClick={() => addActionToNode(selectedNode.id, "SEND_EMAIL")} className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                          + Email
-                        </button>
-                      </div>
-
-                      {selectedNode.actions.length === 0 ? (
-                        <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">No actions yet.</div>
-                      ) : (
-                        <div className="space-y-3">
-                          {selectedNode.actions.map((a) => (
-                            <div key={a.id} className="border border-gray-100 rounded-2xl p-4">
-                              <div className="flex items-center justify-between">
-                                <div className="text-sm font-bold text-primaryText">{a.type}</div>
-                                <button onClick={() => removeActionFromNode(selectedNode.id, a.id)} className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                                  Remove
-                                </button>
-                              </div>
-
-                              {a.type === "SET_STATUS" && (
-                                <div className="mt-3">
-                                  <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Status</p>
-                                  <select
-                                    value={a.payload.statusToSet}
-                                    onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { statusToSet: e.target.value } })}
-                                    className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                                  >
-                                    {STATUS_OPTIONS.map((s) => (
-                                      <option key={s} value={s}>
-                                        {s}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-
-                              {a.type === "ASSIGN_USER" && (
-                                <div className="mt-3 grid grid-cols-1 gap-3">
-                                  <div>
-                                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Mode</p>
-                                    <select
-                                      value={a.payload.mode}
-                                      onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, mode: e.target.value as any } })}
-                                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                                    >
-                                      <option value="ROLE">Role</option>
-                                      <option value="USER">User</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">{a.payload.mode === "ROLE" ? "Role Name" : "User ID/Email"}</p>
-                                    <input
-                                      value={a.payload.value}
-                                      onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, value: e.target.value } })}
-                                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                                      placeholder={a.payload.mode === "ROLE" ? "QA / Agent / Admin" : "user@company.com"}
-                                    />
-                                  </div>
-                                </div>
-                              )}
-
-                              {a.type === "SEND_EMAIL" && (
-                                <div className="mt-3 grid grid-cols-1 gap-3">
-                                  <div>
-                                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">To</p>
-                                    <select
-                                      value={a.payload.to}
-                                      onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, to: e.target.value as any } })}
-                                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                                    >
-                                      <option value="clinic">Clinic</option>
-                                      <option value="agent">Agent</option>
-                                      <option value="qa">QA</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template ID</p>
-                                    <input
-                                      value={a.payload.templateId}
-                                      onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateId: e.target.value } })}
-                                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                                      placeholder="TEMPLATE-001"
-                                    />
-                                  </div>
-                                </div>
-                              )}
-
-                              {a.type === "AUTOFILL_FIELDS" && (
-                                <div className="mt-3 space-y-3">
-                                  <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">Fields</p>
-                                  {a.payload.fields.map((f, idx) => (
-                                    <div key={`${a.id}_${idx}`} className="grid grid-cols-1 gap-2">
-                                      <input
-                                        value={f.key}
-                                        onChange={(e) => {
-                                          const next = a.payload.fields.slice();
-                                          next[idx] = { ...next[idx], key: e.target.value };
-                                          updateAction(selectedNode.id, { ...a, payload: { fields: next } });
-                                        }}
-                                        className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none"
-                                        placeholder="field_key"
-                                      />
-                                      <input
-                                        value={f.value}
-                                        onChange={(e) => {
-                                          const next = a.payload.fields.slice();
-                                          next[idx] = { ...next[idx], value: e.target.value };
-                                          updateAction(selectedNode.id, { ...a, payload: { fields: next } });
-                                        }}
-                                        className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none"
-                                        placeholder="value"
-                                      />
-                                    </div>
-                                  ))}
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => {
-                                        const next = [...a.payload.fields, { key: "", value: "" }];
-                                        updateAction(selectedNode.id, { ...a, payload: { fields: next } });
-                                      }}
-                                      className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
-                                    >
-                                      + Add Field
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        const next = a.payload.fields.slice(0, Math.max(0, a.payload.fields.length - 1));
-                                        updateAction(selectedNode.id, { ...a, payload: { fields: next } });
-                                      }}
-                                      className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
-                                      disabled={a.payload.fields.length === 0}
-                                    >
-                                      Remove Last
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {selectedNode.kind === "DECISION" && (
-                    <div className="text-[11px] text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
-                      Create IF/ELSE branches by selecting an arrow and setting it to IF (with conditions) or ELSE (default).
-                    </div>
-                  )}
+            <div className="p-5 space-y-5">
+              {!selectedNode && !selectedEdge ? (
+                <div className="text-sm text-secondary">
+                  Select a <span className="font-bold text-primaryText">Node</span> to edit actions, or select an{" "}
+                  <span className="font-bold text-primaryText">Arrow</span> to edit IF/ELSE branch conditions.
                 </div>
-              </div>
-            )}
+              ) : null}
 
-            {selectedEdge && (
-              <div className="space-y-4">
-                <div className="border border-gray-100 rounded-2xl p-4 bg-white space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-bold text-primaryText">Branch (Arrow)</div>
-                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">Priority {selectedEdge.priority}</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3">
-                    <div>
-                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Label</p>
-                      <input
-                        value={selectedEdge.label || ""}
-                        onChange={(e) => updateEdgeMeta(selectedEdge.id, { label: e.target.value })}
-                        className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                        placeholder="IF Onboarding / ELSE"
-                      />
+              {selectedNode && (
+                <div className="space-y-4">
+                  <div className="border border-gray-100 rounded-2xl p-4 bg-white space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-bold text-primaryText">Node</div>
+                      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">{nodeBadge(selectedNode.kind)}</span>
                     </div>
 
                     <div>
-                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Priority (IF order)</p>
+                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Name</p>
                       <input
-                        type="number"
-                        value={selectedEdge.priority}
-                        onChange={(e) => updateEdgeMeta(selectedEdge.id, { priority: Number(e.target.value) || 1 })}
+                        value={selectedNode.name}
+                        onChange={(e) => updateNodeName(selectedNode.id, e.target.value)}
                         className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
-                        min={1}
                       />
-                      <p className="text-[11px] text-secondary mt-1">Lower priority runs first (HubSpot style).</p>
                     </div>
 
-                    <div className="flex gap-2">
-                      <button onClick={setEdgeAsIf} className="flex-1 px-4 py-3 rounded-2xl bg-white border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                        Set as IF
-                      </button>
-                      <button onClick={setEdgeAsElse} className="flex-1 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
-                        Set as ELSE
-                      </button>
-                    </div>
+                    {(selectedNode.kind === "ACTION" || selectedNode.kind === "RESULTS") && (
+                      <div className="pt-2 border-t border-gray-100 space-y-4">
+                        {/* ─── Results CRUD ─── */}
+                        <div>
+                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-2">Results (Outcomes)</p>
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {(selectedNode.results || []).map((r: string, ri: number) => (
+                              <span key={ri} className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                                {r}
+                                <button onClick={() => {
+                                  const nr = (selectedNode.results || []).filter((_: string, i: number) => i !== ri);
+                                  onDraftChange({ ...def, nodes: def.nodes.map((n) => n.id === selectedNode.id ? { ...n, results: nr } : n) });
+                                  setNodes((prev) => prev.map((n) => n.id === selectedNode.id ? { ...n, data: { ...(n.data as any), results: nr } } : n));
+                                }} className="hover:text-red-500 ml-0.5">✕</button>
+                              </span>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <input id="__newResult" className="flex-1 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs text-primaryText outline-none" placeholder="e.g. Approved, Denied..." />
+                            <button onClick={() => {
+                              const inp = document.getElementById("__newResult") as HTMLInputElement;
+                              const v = inp?.value?.trim();
+                              if (!v) return;
+                              const nr = [...(selectedNode.results || []), v];
+                              onDraftChange({ ...def, nodes: def.nodes.map((n) => n.id === selectedNode.id ? { ...n, results: nr } : n) });
+                              setNodes((prev) => prev.map((n) => n.id === selectedNode.id ? { ...n, data: { ...(n.data as any), results: nr } } : n));
+                              inp.value = "";
+                            }} className="px-3 py-2 rounded-2xl bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-xs">+ Add</button>
+                          </div>
+                        </div>
 
-                    {!selectedEdge.conditionGroup ? (
-                      <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
-                        This is <span className="font-bold text-primaryText">ELSE</span> (default). No conditions.
+
+                        {selectedNode.kind === "ACTION" && (
+                          /* ─── Actions list ─── */
+                          <div>
+                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-2">Actions</p>
+                            <div className="flex flex-wrap gap-1 mb-3">
+                              {([
+                                ["SET_STATUS", "Disposition"],
+                                ["AUTOFILL_FIELDS", "Autofill"],
+                                ["ASSIGN_USER", "Assign"],
+                                ["SEND_EMAIL", "Email"],
+                                ["SEND_FAX", "Fax"],
+                                ["EXPIRE", "Expire"],
+                                ["REQUEUE", "Requeue"],
+                                ["API_CALL", "API Call"],
+                                ["GENERATE_PDF", "Gen PDF"],
+                                ["REQUEUE_LIMIT_CHECK", "Requeue Limit"],
+                              ] as [ActionType, string][]).map(([type, label]) => (
+                                <button key={type} onClick={() => addActionToNode(selectedNode.id, type)} className="px-2 py-1.5 rounded-xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]">
+                                  + {label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {selectedNode.actions.length === 0 ? (
+                              <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">No actions yet.</div>
+                            ) : (
+                              <div className="space-y-3">
+                                {selectedNode.actions.map((a) => (
+                                  <div key={a.id} className="border border-gray-100 rounded-2xl p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="text-xs font-bold text-primaryText">{a.type.replace(/_/g, " ")}</div>
+                                      <button onClick={() => removeActionFromNode(selectedNode.id, a.id)} className="px-2 py-1 rounded-xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]">
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+
+                                    {/* ── SET_STATUS (Disposition selector) ── */}
+                                    {a.type === "SET_STATUS" && (
+                                      <div>
+                                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Disposition</p>
+                                        <select
+                                          value={a.payload.dispositionId}
+                                          onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { dispositionId: e.target.value } })}
+                                          className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
+                                        >
+                                          <option value="">— Select Disposition —</option>
+                                          {dispositions.map((d) => (
+                                            <option key={d.id} value={d.id}>{d.name} ({d.queue})</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    )}
+
+                                    {/* ── AUTOFILL_FIELDS ── */}
+                                    {a.type === "AUTOFILL_FIELDS" && (
+                                      <div className="space-y-2">
+                                        {a.payload.fields.map((f, idx) => (
+                                          <div key={idx} className="grid grid-cols-3 gap-1">
+                                            <select value={f.key} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], key: e.target.value }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none">
+                                              <option value="">Field…</option>
+                                              {SYSTEM_FIELDS.map((sf) => <option key={sf.key} value={sf.key}>{sf.label}</option>)}
+                                            </select>
+                                            <select value={f.op} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], op: e.target.value as any }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none">
+                                              <option value="IS">IS</option>
+                                              <option value="IS_NOT">IS NOT</option>
+                                              <option value="EXISTS">EXISTS</option>
+                                            </select>
+                                            <input value={f.value} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], value: e.target.value }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none" placeholder="value" disabled={f.op === "EXISTS"} />
+                                          </div>
+                                        ))}
+                                        <div className="flex gap-1">
+                                          <button onClick={() => updateAction(selectedNode.id, { ...a, payload: { fields: [...a.payload.fields, { key: "", op: "IS" as const, value: "" }] } })} className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold text-[10px]">+ Field</button>
+                                          {a.payload.fields.length > 0 && <button onClick={() => updateAction(selectedNode.id, { ...a, payload: { fields: a.payload.fields.slice(0, -1) } })} className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold text-[10px]">− Remove</button>}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* ── ASSIGN_USER ── */}
+                                    {a.type === "ASSIGN_USER" && (
+                                      <div className="grid grid-cols-1 gap-2">
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Target Type</p>
+                                          <select value={a.payload.mode} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, mode: e.target.value as any, value: "" } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                            <option value="ROLE">Role</option>
+                                            <option value="DEPARTMENT">Department</option>
+                                            <option value="PERSON">Person</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">{a.payload.mode === "ROLE" ? "Role" : a.payload.mode === "DEPARTMENT" ? "Department" : "Person"}</p>
+                                          <select value={a.payload.value} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, value: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                            <option value="">— Select —</option>
+                                            {(a.payload.mode === "ROLE" ? ROLE_OPTIONS : a.payload.mode === "DEPARTMENT" ? DEPARTMENT_OPTIONS : PERSON_OPTIONS).map((o) => <option key={o} value={o}>{o}</option>)}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* ── SEND_EMAIL ── */}
+                                    {a.type === "SEND_EMAIL" && (
+                                      <div className="grid grid-cols-1 gap-2">
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">To</p>
+                                          <select value={a.payload.to} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, to: e.target.value as any } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                            <option value="clinic">Clinic</option>
+                                            <option value="agent">Agent</option>
+                                            <option value="qa">QA</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Email Template</p>
+                                          <select value={a.payload.templateId} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateId: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                            <option value="">— Select Template —</option>
+                                            {emailTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* ── SEND_FAX ── */}
+                                    {a.type === "SEND_FAX" && (
+                                      <div className="grid grid-cols-1 gap-2">
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Fax Template</p>
+                                          <select value={a.payload.templateId} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateId: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                            <option value="">— Select Template —</option>
+                                            {faxTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">To (Fax Number)</p>
+                                          <input value={a.payload.to} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, to: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" placeholder="555-123-4567" />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* ── EXPIRE ── */}
+                                    {a.type === "EXPIRE" && (
+                                      <div>
+                                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Expire After (Days)</p>
+                                        <input type="number" min={1} value={a.payload.days} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { days: Number(e.target.value) || 1 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
+                                        <p className="text-[10px] text-secondary mt-1">Items in EV/PA queues expire after this many days.</p>
+                                      </div>
+                                    )}
+
+                                    {/* ── REQUEUE ── */}
+                                    {a.type === "REQUEUE" && (
+                                      <div className="space-y-2">
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Hours</p>
+                                            <input type="number" min={0} value={a.payload.delayHours} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, delayHours: Number(e.target.value) || 0 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
+                                          </div>
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Minutes</p>
+                                            <input type="number" min={0} max={59} value={a.payload.delayMinutes} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, delayMinutes: Number(e.target.value) || 0 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
+                                          </div>
+                                        </div>
+                                        <label className="flex items-center gap-2 text-xs text-primaryText cursor-pointer">
+                                          <input type="checkbox" checked={a.payload.hiddenFromQueue} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, hiddenFromQueue: e.target.checked } })} className="rounded" />
+                                          Hidden from queue (visible to managers only)
+                                        </label>
+                                      </div>
+                                    )}
+
+                                    {/* ── API_CALL ── */}
+                                    {a.type === "API_CALL" && (
+                                      <div className="space-y-2">
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Method</p>
+                                            <select value={a.payload.method} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, method: e.target.value as any } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                              <option value="GET">GET</option>
+                                              <option value="POST">POST</option>
+                                              <option value="PUT">PUT</option>
+                                              <option value="DELETE">DELETE</option>
+                                            </select>
+                                          </div>
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">URL</p>
+                                            <input value={a.payload.url} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, url: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" placeholder="https://api.example.com" />
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Headers (JSON)</p>
+                                          <textarea value={a.payload.headers} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, headers: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs outline-none w-full h-16 font-mono" placeholder='{"Authorization": "Bearer ..."}' />
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Body (JSON)</p>
+                                          <textarea value={a.payload.body} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, body: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs outline-none w-full h-16 font-mono" placeholder='{"key": "value"}' />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* ── GENERATE_PDF ── */}
+                                    {a.type === "GENERATE_PDF" && (
+                                      <div className="space-y-2">
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template Name</p>
+                                          <input value={a.payload.templateName} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateName: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" placeholder="EV Summary Report" />
+                                        </div>
+                                        <label className="flex items-center gap-2 text-xs text-primaryText cursor-pointer">
+                                          <input type="checkbox" checked={a.payload.saveToDocuments} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, saveToDocuments: e.target.checked } })} className="rounded" />
+                                          Save to Documents
+                                        </label>
+                                      </div>
+                                    )}
+
+                                    {/* ── REQUEUE_LIMIT_CHECK ── */}
+                                    {a.type === "REQUEUE_LIMIT_CHECK" && (
+                                      <div className="space-y-2">
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">If requeueCount ≥</p>
+                                          <input type="number" min={1} value={a.payload.maxCount} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, maxCount: Number(e.target.value) || 1 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Then route to Result</p>
+                                          <select value={a.payload.routeToResult} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, routeToResult: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
+                                            <option value="">— Select Result —</option>
+                                            {(selectedNode.results || []).map((r: string) => <option key={r} value={r}>{r}</option>)}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <ConditionGroupEditor title="IF conditions (AND/OR)" group={selectedEdge.conditionGroup} onChange={(g) => updateEdgeMeta(selectedEdge.id, { conditionGroup: g })} />
+                    )}
+
+                    {selectedNode.kind === "DECISION" && (
+                      <div className="text-[11px] text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
+                        Create IF/ELSE branches by selecting an arrow and setting it to IF (with conditions) or ELSE (default).
+                      </div>
                     )}
                   </div>
+                </div>
+              )}
 
-                  <div className="text-[11px] text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
-                    <span className="font-bold text-primaryText">Manager requirement:</span> branches + triggers + visual arrows + left actions → same HubSpot workflow feel.
+              {selectedEdge && (
+                <div className="space-y-4">
+                  <div className="border border-gray-100 rounded-2xl p-4 bg-white space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-bold text-primaryText">Branch (Arrow)</div>
+                      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">Priority {selectedEdge.priority}</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Label</p>
+                        <input
+                          value={selectedEdge.label || ""}
+                          onChange={(e) => updateEdgeMeta(selectedEdge.id, { label: e.target.value })}
+                          className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
+                          placeholder="IF Onboarding / ELSE"
+                        />
+                      </div>
+
+                      {/* Result selector for this edge */}
+                      <div>
+                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Result (from source node)</p>
+                        {(() => {
+                          const srcNode = def.nodes.find((n) => n.id === selectedEdge.source);
+                          const srcResults = srcNode?.results || [];
+                          return (
+                            <select
+                              value={selectedEdge.resultLabel || ""}
+                              onChange={(e) => updateEdgeMeta(selectedEdge.id, { resultLabel: e.target.value || undefined } as any)}
+                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
+                            >
+                              <option value="">Default / Else</option>
+                              {srcResults.map((r) => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                          );
+                        })()}
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Priority (IF order)</p>
+                        <input
+                          type="number"
+                          value={selectedEdge.priority}
+                          onChange={(e) => updateEdgeMeta(selectedEdge.id, { priority: Number(e.target.value) || 1 })}
+                          className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
+                          min={1}
+                        />
+                        <p className="text-[11px] text-secondary mt-1">Lower priority runs first (HubSpot style).</p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button onClick={setEdgeAsIf} className="flex-1 px-4 py-3 rounded-2xl bg-white border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
+                          Set as IF
+                        </button>
+                        <button onClick={setEdgeAsElse} className="flex-1 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">
+                          Set as ELSE
+                        </button>
+                      </div>
+
+                      {!selectedEdge.conditionGroup ? (
+                        <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
+                          This is <span className="font-bold text-primaryText">ELSE</span> (default). No conditions.
+                        </div>
+                      ) : (
+                        <ConditionGroupEditor title="IF conditions (AND/OR)" group={selectedEdge.conditionGroup} onChange={(g) => updateEdgeMeta(selectedEdge.id, { conditionGroup: g })} />
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
+                      <span className="font-bold text-primaryText">Flow:</span> Actions chain automatically — each node fires in sequence until the process reaches an END node.
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div className="text-xs text-secondary bg-white border border-gray-100 rounded-2xl p-4">
-        Tip: drag nodes, connect arrows. Select arrow to set IF/ELSE & conditions. Publish versions for stable production behavior.
-      </div>
+        </>
+      )}
     </div>
   );
 };
@@ -2497,9 +2865,8 @@ const QueuesSection: React.FC<{
               return (
                 <div
                   key={q.id}
-                  className={`grid grid-cols-12 gap-2 px-6 py-4 items-center transition cursor-pointer ${
-                    selected ? "bg-primary/5" : "hover:bg-gray-50"
-                  }`}
+                  className={`grid grid-cols-12 gap-2 px-6 py-4 items-center transition cursor-pointer ${selected ? "bg-primary/5" : "hover:bg-gray-50"
+                    }`}
                   onClick={() => onSelectQueue(q.id)}
                   title="Click to open dispositions"
                 >
@@ -2509,7 +2876,7 @@ const QueuesSection: React.FC<{
                   </div>
 
                   <div className="col-span-3 text-sm text-secondary font-medium">
-                    {q.enabled ? "Enabled" : "Disabled"}
+                    {q.enabled ? "Active" : "Inactive"}
                     {selected ? " • Selected" : ""}
                   </div>
 
@@ -2520,15 +2887,15 @@ const QueuesSection: React.FC<{
                         onToggleEnabled(q.id);
                       }}
                       className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
-                      title="Toggle enabled"
+                      title="Toggle status"
                     >
                       {q.enabled ? (
                         <span className="inline-flex items-center gap-2">
-                          <ToggleLeft size={16} /> TRUE
+                          <ToggleLeft size={16} /> Active
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-2">
-                          <ToggleRight size={16} className="text-primary" /> FALSE
+                          <ToggleRight size={16} className="text-primary" /> Inactive
                         </span>
                       )}
                     </button>
@@ -2565,10 +2932,10 @@ const AddQueueForm: React.FC<{
       </div>
 
       <div className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
-        <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Enabled</p>
-        <select value={enabled ? "true" : "false"} onChange={(e) => setEnabled(e.target.value === "true")} className="bg-transparent outline-none w-full text-sm text-primaryText">
-          <option value="true">TRUE</option>
-          <option value="false">FALSE</option>
+        <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Status</p>
+        <select value={enabled ? "active" : "inactive"} onChange={(e) => setEnabled(e.target.value === "active")} className="bg-transparent outline-none w-full text-sm text-primaryText">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
         </select>
       </div>
 
@@ -2579,9 +2946,8 @@ const AddQueueForm: React.FC<{
         <button
           disabled={!canSave}
           onClick={() => onSave({ name: name.trim(), enabled })}
-          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${
-            canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
-          }`}
+          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            }`}
         >
           <Save size={18} />
           Save Queue
@@ -2633,11 +2999,10 @@ const DispositionsSection: React.FC<{
 
       <div className="border border-gray-100 rounded-[24px] overflow-hidden">
         <div className="grid grid-cols-12 gap-2 px-6 py-4 bg-gray-50 text-xs font-bold text-secondary uppercase tracking-wide">
-          <div className="col-span-1">Code</div>
           <div className="col-span-5">Disposition</div>
           <div className="col-span-3">Queue</div>
           <div className="col-span-2">Outcome Tag</div>
-          <div className="col-span-1 text-right">Enabled</div>
+          <div className="col-span-2 text-right">Status</div>
         </div>
 
         {dispositions.length === 0 ? (
@@ -2651,7 +3016,6 @@ const DispositionsSection: React.FC<{
                 onClick={() => onRowClick(d.id)}
                 title="Click to open disposition workflow"
               >
-                <div className="col-span-1 text-sm font-bold text-primaryText">{d.code}</div>
                 <div className="col-span-5">
                   <div className="text-sm font-bold text-primaryText">{d.name}</div>
                   <div className="text-[11px] text-secondary mt-1">Click row → open builder</div>
@@ -2659,22 +3023,22 @@ const DispositionsSection: React.FC<{
                 <div className="col-span-3 text-sm text-secondary font-medium">{d.queue}</div>
                 <div className="col-span-2 text-sm text-secondary font-medium">{d.outcomeTag || "—"}</div>
 
-                <div className="col-span-1 flex justify-end">
+                <div className="col-span-2 flex justify-end">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onToggleEnabled(d.id);
                     }}
                     className="px-3 py-2 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
-                    title="Toggle enabled"
+                    title="Toggle status"
                   >
                     {d.enabled ? (
                       <span className="inline-flex items-center gap-2">
-                        <ToggleLeft size={16} /> TRUE
+                        <ToggleLeft size={16} /> Active
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-2">
-                        <ToggleRight size={16} className="text-primary" /> FALSE
+                        <ToggleRight size={16} className="text-primary" /> Inactive
                       </span>
                     )}
                   </button>
@@ -2693,9 +3057,8 @@ const DispositionsSection: React.FC<{
  *  ----------------------------- */
 const AddDispositionForm: React.FC<{
   onCancel: () => void;
-  onSave: (payload: Omit<Disposition, "id">) => void;
+  onSave: (payload: Omit<Disposition, "id" | "code">) => void;
 }> = ({ onCancel, onSave }) => {
-  const [code, setCode] = useState<number>(0);
   const [name, setName] = useState("");
   const [queue, setQueue] = useState("PI - Waiting Queue");
   const [enabled, setEnabled] = useState(true);
@@ -2716,28 +3079,16 @@ const AddDispositionForm: React.FC<{
   ];
 
   const outcomeTagOptions = ["—", "Missing/Invalid Info", "Data Entry", "Pending", "Auditing", "EV Uploaded To EHR", "Submitted"];
-  const canSave = Number(code) > 0 && name.trim().length >= 3;
+  const canSave = name.trim().length >= 3;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
-          <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Code</p>
-          <input
-            type="number"
-            value={code || ""}
-            onChange={(e) => setCode(Number(e.target.value || 0))}
-            className="bg-transparent outline-none w-full text-sm text-primaryText placeholder:text-secondary"
-            placeholder="e.g., 91"
-            min={1}
-          />
-        </div>
-
-        <div className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
-          <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Enabled</p>
-          <select value={enabled ? "true" : "false"} onChange={(e) => setEnabled(e.target.value === "true")} className="bg-transparent outline-none w-full text-sm text-primaryText">
-            <option value="true">TRUE</option>
-            <option value="false">FALSE</option>
+        <div className="lg:col-span-2 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
+          <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Status</p>
+          <select value={enabled ? "active" : "inactive"} onChange={(e) => setEnabled(e.target.value === "active")} className="bg-transparent outline-none w-full text-sm text-primaryText">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
           </select>
         </div>
 
@@ -2777,16 +3128,14 @@ const AddDispositionForm: React.FC<{
           disabled={!canSave}
           onClick={() =>
             onSave({
-              code: Number(code),
               name: name.trim(),
               queue,
               enabled,
               outcomeTag: outcomeTag.trim() || "—",
             })
           }
-          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${
-            canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
-          }`}
+          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            }`}
         >
           <Save size={18} />
           Save Disposition
