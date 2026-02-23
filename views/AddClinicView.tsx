@@ -74,6 +74,7 @@ const AddClinicView: React.FC = () => {
     taxId: '',
     phone: '',
     email: '',
+    medicarePtan: '',
     fax: '',
     street: '',
     city: '',
@@ -97,6 +98,7 @@ const AddClinicView: React.FC = () => {
     groupStatus: string;
     provider1Status: string;
     provider2Status: string;
+    medicarePtan: string;
   };
 
   const [payerMatrixRows, setPayerMatrixRows] = useState<PayerMatrixRow[]>(
@@ -200,7 +202,7 @@ const AddClinicView: React.FC = () => {
     }
   };
 
-  const isFormComplete = formData.name && formData.npi && formData.taxId && formData.email;
+  const isFormComplete = formData.name && formData.npi && formData.taxId && formData.email && formData.medicarePtan;
 
   const addInsuranceRow = () => {
     setFormData({
@@ -261,9 +263,7 @@ const AddClinicView: React.FC = () => {
                 <tr className="bg-white border-t border-gray-200">
                   <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">EIN: <span className="text-primaryText font-bold ml-2">{formData.taxId || '—'}</span></td>
                   {/* <td className="px-6 py-4 border-r border-gray-200 bg-gray-50"></td> */}
-                  <td className="px-6 py-4 border-r border-gray-200 bg-white">
-                   <span className="text-primaryText font-bold">Medicare Ptan</span>
-                  </td>
+                  <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">Medicare PTAN: <span className="text-primaryText font-bold">{formData.medicarePtan || '—'}</span></td>
                   {/* <td className="px-6 py-4 font-semibold text-secondary italic">Previous Clinic Address (if Applicable)</td> */}
                   <td className="px-6 py-4">
                     <input
@@ -278,10 +278,7 @@ const AddClinicView: React.FC = () => {
             </table>
           </div>
 
-          {/* <div className="space-y-4">
-            <h3 className="font-bold text-lg text-primaryText">Payer Network Coverage Matrix</h3>
-            <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm"> */}
-
+         
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-lg text-primaryText">Payer Network Coverage Matrix</h3>
@@ -304,35 +301,7 @@ const AddClinicView: React.FC = () => {
                     <th className="px-4 py-3">Provider #2 - {formData.providers?.[1]?.fullName || 'N/A'}</th>
                   </tr>
                 </thead>
-                {/* <tbody className="divide-y divide-gray-100">
-                  {INITIAL_INSURANCE_LIST.slice(0, 10).map((company) => (
-                    <tr key={company} className="hover:bg-gray-50/50">
-                      <td className="px-4 py-2 font-bold text-primaryText border-r border-gray-200">{company}</td>
-                      <td className="px-2 py-1 border-r border-gray-200">
-                        <select className="w-full p-1 rounded border-none bg-transparent font-medium">
-                          <option>Select...</option>
-                          <option>In-Network</option>
-                          <option>Out-of-Network</option>
-                        </select>
-                      </td>
-                      <td className="px-2 py-1 border-r border-gray-200 bg-yellow-50/50">
-                        <select className="w-full p-1 rounded border-none bg-transparent font-medium text-primary">
-                          <option>Select...</option>
-                          <option>In-Network</option>
-                          <option>Out-of-Network</option>
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <select className="w-full p-1 rounded border-none bg-transparent font-medium text-primary">
-                          <option>Select...</option>
-                          <option>In-Network</option>
-                          <option>Out-of-Network</option>
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody> */}
-
+                
                 <tbody className="divide-y divide-gray-100">
                   {payerMatrixRows.map((row, idx) => (
                     <tr key={`${row.id}-${idx}`} className="hover:bg-gray-50/50">
@@ -635,7 +604,7 @@ const AddClinicView: React.FC = () => {
               
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">Street Address (Number and Street Name)</label>
+                  <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">Street Address</label>
                   <input value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} placeholder="e.g. 123 Healthcare Blvd" className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-accent" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -702,6 +671,23 @@ const AddClinicView: React.FC = () => {
                   <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">Email Contact *</label>
                   <input value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary" />
                 </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">
+                      Medicare PTAN *
+                    </label>
+                    <input
+                      value={formData.medicarePtan || ''}
+                      onChange={(e) => {
+                        // allow only digits, max 8 chars
+                        const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 8);
+                        setFormData({ ...formData, medicarePtan: digitsOnly });
+                      }}
+                      inputMode="numeric"
+                      placeholder="8 digits"
+                      className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary"
+                    />
+              
+                  </div>
                  <div className="space-y-1">
                   <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">Phone Line</label>
                   <input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary" />
