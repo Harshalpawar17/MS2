@@ -1,5 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
+import PAYERS from '../data/payers.json';
+// new addedd line for serch options in the payer network coverage matrix above
 import { 
   Building2, 
   Plus, 
@@ -27,11 +29,107 @@ import {
 import { CLINIC_PODS, PORTFOLIOS } from '../constants';
 import { Clinic, Provider, InsuranceCredential, SystemAccess } from '../types';
 
-const INITIAL_INSURANCE_LIST = [
-  'Aetna', 'American Speciality Health', 'Ambetter', 'Anthem/BCBS', 
-  'Caresource', 'Cigna', 'Humana', 'Medicaid', 'Medicare', 
-  'Molina/Passport', 'Optum', 'TriCare', 'UMR', 'United Healthcare', 'Wellcare'
-];
+// const INITIAL_INSURANCE_LIST = [
+//   'Aetna', 'American Speciality Health', 'Ambetter', 'Anthem/BCBS', 
+//   'Caresource', 'Cigna', 'Humana', 'Medicaid', 'Medicare', 
+//   'Molina/Passport', 'Optum', 'TriCare', 'UMR', 'United Healthcare', 'Wellcare'
+// ];
+
+const INITIAL_INSURANCE_LIST = (PAYERS as string[]);
+
+function InlineSearchSelect({
+  value,
+  options,
+  placeholder = "Select...",
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  placeholder?: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+
+  const filtered = React.useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return options.slice(0, 50);
+    return options
+      .filter((o) => o.toLowerCase().includes(query))
+      .slice(0, 50);
+  }, [q, options]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="w-full text-left bg-transparent font-bold text-primaryText outline-none"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((s) => !s);
+        }}
+      >
+        <span className={value ? "" : "text-secondary/60"}>
+          {value || placeholder}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-50 mt-2 w-[360px] max-w-[90vw] rounded-2xl border border-gray-200 bg-white shadow-xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="p-3 border-b border-gray-100">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search insurance company…"
+              className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-transparent outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
+          <div className="max-h-64 overflow-auto">
+            {filtered.length === 0 ? (
+              <div className="px-4 py-3 text-sm font-semibold text-secondary">
+                No matches found
+              </div>
+            ) : (
+              filtered.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  className="w-full px-4 py-3 text-left hover:bg-primary/[0.04] transition-all font-bold text-primaryText"
+                  onClick={() => {
+                    onChange(opt);
+                    setOpen(false);
+                    setQ("");
+                  }}
+                >
+                  {opt}
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="p-2 border-t border-gray-100 bg-gray-50 flex justify-end">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-secondary hover:bg-white border border-transparent hover:border-gray-200"
+              onClick={() => {
+                setOpen(false);
+                setQ("");
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const AddClinicView: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'details' | 'credentials' | 'edit'>('list');
@@ -308,14 +406,11 @@ const AddClinicView: React.FC = () => {
                     {/* <tr key={row.id} className="hover:bg-gray-50/50"></tr> */}
                       {/* Insurance Company (editable) */}
                       <td className="px-4 py-2 border-r border-gray-200">
-                        <input
+                        <InlineSearchSelect
                           value={row.company}
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          onChange={(e) => updatePayerMatrixRow(idx, "company", e.target.value)}
-                          placeholder="Insurance Company"
-                          className="w-full bg-transparent font-bold text-primaryText outline-none"
+                          options={INITIAL_INSURANCE_LIST}
+                          placeholder="Select..."
+                          onChange={(v) => updatePayerMatrixRow(idx, "company", v)}
                         />
                       </td>
 
