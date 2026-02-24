@@ -51,6 +51,9 @@ function InlineSearchSelect({
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
 
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
   const filtered = React.useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return options.slice(0, 50);
@@ -59,14 +62,54 @@ function InlineSearchSelect({
       .slice(0, 50);
   }, [q, options]);
 
+  // Close when clicking outside
+  React.useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const el = containerRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && !el.contains(e.target)) {
+        setOpen(false);
+        setQ("");
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        setQ("");
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  // Focus search input when opened
+  React.useEffect(() => {
+    if (open) {
+      // let popover mount then focus
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <button
         type="button"
         className="w-full text-left bg-transparent font-bold text-primaryText outline-none"
         onClick={(e) => {
           e.stopPropagation();
           setOpen((s) => !s);
+          if (!open) setQ(""); // reset query when opening
         }}
       >
         <span className={value ? "" : "text-secondary/60"}>
@@ -82,7 +125,7 @@ function InlineSearchSelect({
         >
           <div className="p-3 border-b border-gray-100">
             <input
-              autoFocus
+              ref={inputRef}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search insurance company…"
@@ -96,20 +139,30 @@ function InlineSearchSelect({
                 No matches found
               </div>
             ) : (
-              filtered.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  className="w-full px-4 py-3 text-left hover:bg-primary/[0.04] transition-all font-bold text-primaryText"
-                  onClick={() => {
-                    onChange(opt);
-                    setOpen(false);
-                    setQ("");
-                  }}
-                >
-                  {opt}
-                </button>
-              ))
+              filtered.map((opt) => {
+                const isSelected = opt === value;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    className="w-full px-4 py-3 text-left hover:bg-primary/[0.04] transition-all font-bold text-primaryText flex items-center justify-between"
+                    onClick={() => {
+                      onChange(opt);
+                      setOpen(false);
+                      setQ("");
+                    }}
+                  >
+                    <span className="truncate pr-3">{opt}</span>
+
+                    {/* Selected checkmark */}
+                    {isSelected ? (
+                      <span className="text-primary font-black">✓</span>
+                    ) : (
+                      <span className="text-transparent font-black">✓</span>
+                    )}
+                  </button>
+                );
+              })
             )}
           </div>
 
@@ -173,6 +226,7 @@ const AddClinicView: React.FC = () => {
     phone: '',
     email: '',
     medicarePtan: '',
+    medicaidId: '',
     fax: '',
     street: '',
     city: '',
@@ -300,7 +354,7 @@ const AddClinicView: React.FC = () => {
     }
   };
 
-  const isFormComplete = formData.name && formData.npi && formData.taxId && formData.email && formData.medicarePtan;
+  const isFormComplete = formData.name && formData.npi && formData.taxId && formData.email && formData.medicarePtan && formData.medicaidId;
 
   const addInsuranceRow = () => {
     setFormData({
@@ -342,26 +396,25 @@ const AddClinicView: React.FC = () => {
               <thead className="bg-gray-200/50">
                 <tr>
                   <th className="px-6 py-4 font-bold text-primaryText border-r border-gray-200">Clinic Information</th>
-                  <th className="px-6 py-4 font-bold text-primaryText border-r border-gray-200">Group - Network Status</th>
+                  <th className="px-6 py-4 font-bold text-primaryText border-r border-gray-200">ID</th>
                   <th className="px-6 py-4 font-bold text-primaryText">Clinic Address</th>
                 </tr>
               </thead>
               <tbody>
                 <tr className="bg-white border-t border-gray-200">
                   <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">NPI: <span className="text-primaryText font-bold ml-2">{formData.npi || '—'}</span></td>
-                  <td className="px-6 py-4 border-r border-gray-200">
-                    <select className="w-full bg-yellow-50 p-2 rounded-lg border border-yellow-200 font-bold text-primaryText">
-                      <option>Select Network Status</option>
-                      <option>In-Network</option>
-                      <option>Out-of-Network</option>
-                    </select>
+                  <td className="px-6 py-4 border-r border-gray-200 font-semibold text-secondary">
+                    Medicaid ID:
+                    <span className="text-primaryText font-bold ml-2">
+                      {formData.medicaidId || '—'}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 font-bold text-primaryText">{formData.street || '—'}, {formData.city || ''}</td>
+                  <td className="px-6 py-4 font-bold text-primaryText">{formData.street || '—'}, {formData.city || '-'}</td>
                 </tr>
                 <tr className="bg-white border-t border-gray-200">
                   <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">EIN: <span className="text-primaryText font-bold ml-2">{formData.taxId || '—'}</span></td>
                   {/* <td className="px-6 py-4 border-r border-gray-200 bg-gray-50"></td> */}
-                  <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">Medicare PTAN: <span className="text-primaryText font-bold">{formData.medicarePtan || '—'}</span></td>
+                  <td className="px-6 py-4 font-semibold text-secondary border-r border-gray-200">Medicare PTAN: <span className="text-primaryText font-bold ml-2">{formData.medicarePtan || '—'}</span></td>
                   {/* <td className="px-6 py-4 font-semibold text-secondary italic">Previous Clinic Address (if Applicable)</td> */}
                   <td className="px-6 py-4">
                     <input
@@ -778,11 +831,31 @@ const AddClinicView: React.FC = () => {
                         setFormData({ ...formData, medicarePtan: digitsOnly });
                       }}
                       inputMode="numeric"
-                      placeholder="8 digits"
                       className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary"
                     />
-              
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">
+                      Medicaid ID *
+                    </label>
+                    <input
+                      value={formData.medicaidId || ''}
+                      onChange={(e) => {
+                        // allow only digits, max 8 chars (same as PTAN)
+                        const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 15);
+                        setFormData({ ...formData, medicaidId: digitsOnly });
+                      }}
+                      inputMode="numeric"
+                      
+                      className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary"
+                    />
+                    {/* <p className="text-[11px] text-secondary/70 font-medium pl-1">
+                      Numeric only (max 15 digits).
+                    </p> */}
+                  </div>
+
+
+
                  <div className="space-y-1">
                   <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">Phone Line</label>
                   <input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border-transparent rounded-2xl outline-none font-bold text-primaryText focus:ring-2 focus:ring-primary" />
