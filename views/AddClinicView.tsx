@@ -281,6 +281,12 @@ const AddClinicView: React.FC = () => {
     );
   };
 
+  // delete row function for the payer network coverage matrix
+
+  const deletePayerMatrixRow = (rowId: string) => {
+    setPayerMatrixRows((prev) => prev.filter((r) => r.id !== rowId));
+  };
+
   const filteredClinics = useMemo(() => {
     return clinics.filter(clinic => {
       const matchesSearch = clinic.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -442,20 +448,39 @@ const AddClinicView: React.FC = () => {
                 </button>
               </div>
 
+              
+
               <div className="border border-gray-100 rounded-3xl overflow-hidden shadow-sm">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-100 font-bold text-secondary">
+                {/* <thead className="bg-gray-100 font-bold text-secondary">
                   <tr>
                     <th className="px-4 py-3 border-r border-gray-200 w-48">Insurance Company</th>
                     <th className="px-4 py-3 border-r border-gray-200">Group - Network Status</th>
                     <th className="px-4 py-3 border-r border-gray-200">Provider #1 - {formData.providers?.[0]?.fullName || 'N/A'}</th>
                     <th className="px-4 py-3">Provider #2 - {formData.providers?.[1]?.fullName || 'N/A'}</th>
                   </tr>
-                </thead>
-                
+                </thead> */}
+
+                <thead className="bg-gray-100 font-bold text-secondary">
+                  <tr>
+                    <th className="px-4 py-3 border-r border-gray-200 w-48">Insurance Company</th>
+                    <th className="px-4 py-3 border-r border-gray-200">Group - Network Status</th>
+                    <th className="px-4 py-3 border-r border-gray-200">
+                      Provider #1 - {formData.providers?.[0]?.fullName || 'N/A'}
+                    </th>
+                    <th className="px-4 py-3 border-r border-gray-200">
+                      Provider #2 - {formData.providers?.[1]?.fullName || 'N/A'}
+                    </th>
+                    <th className="px-4 py-3 w-14 text-center"></th>
+                  </tr>
+                  
+                </thead>  
+              
+              
                 <tbody className="divide-y divide-gray-100">
                   {payerMatrixRows.map((row, idx) => (
-                    <tr key={`${row.id}-${idx}`} className="hover:bg-gray-50/50">
+                    <tr key={row.id} className="group hover:bg-gray-50/50">
+                    {/* <tr key={row.id} className="group hover:bg-gray-50/50"></tr> */}
                     {/* <tr key={row.id} className="hover:bg-gray-50/50"></tr> */}
                       {/* Insurance Company (editable) */}
                       <td className="px-4 py-2 border-r border-gray-200">
@@ -496,7 +521,7 @@ const AddClinicView: React.FC = () => {
                       </td>
 
                       {/* Provider #2 */}
-                      <td className="px-2 py-1">
+                      <td className="px-2 py-1 border-r border-gray-200">
                         <select
                           value={row.provider2Status}
                           onChange={(e) => updatePayerMatrixRow(idx, "provider2Status", e.target.value)}
@@ -506,6 +531,21 @@ const AddClinicView: React.FC = () => {
                           <option value="In-Network">In-Network</option>
                           <option value="Out-of-Network">Out-of-Network</option>
                         </select>
+                      </td>
+                      {/* Delete Action */}
+                      <td className="px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePayerMatrixRow(row.id);
+                          }}
+                          // className="inline-flex items-center justify-center h-9 w-9 rounded-xl border border-gray-200 bg-white text-secondary/50 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                          className="inline-flex items-center justify-center h-9 w-9 rounded-xl border border-gray-200 bg-white text-secondary/50 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-all"
+                          title="Delete row"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </td>
                     </tr>
                   ))}

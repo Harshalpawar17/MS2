@@ -40,8 +40,8 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
     { to: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
     { to: '/intake', icon: <FilePlus size={20} />, label: 'Select Intake' },
     { to: '/submissions', icon: <ClipboardList size={20} />, label: 'My Submissions' },
-    { to: '/claims', icon: <Scale size={20} />, label: 'WC/PI Cases' },
-    { to: '/ev-claims', icon: <ShieldCheck size={20} />, label: 'EV Cases' },
+    // { to: '/claims', icon: <Scale size={20} />, label: 'WC/PI Cases' },
+    // { to: '/ev-claims', icon: <ShieldCheck size={20} />, label: 'EV Cases' },
   ];
 
   const adminLinks = [
