@@ -114,7 +114,7 @@ const MySubmissionsView: React.FC<MySubmissionsViewProps> = ({ userRole }) => {
     <div className="space-y-10 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
         <div>
-          <h1 className="text-4xl font-black text-primaryText tracking-tight">Case Management</h1>
+          <h1 className="text-4xl font-black text-primaryText tracking-tight">My Submissions</h1>
         </div>
 
         {/* Pinned Clinic Actions Section - Moved to top-right */}
