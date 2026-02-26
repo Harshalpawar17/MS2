@@ -49,6 +49,7 @@ const MOCK_CLINICS: Clinic[] = Array.from({ length: 10 }, (_, i) => ({
 
   // ✅ required by Clinic type:
   medicarePtan: '',
+  medicaidId: "",   // Added medicaidId as a required field with default empty value
   insuranceCredentials: [],
   systemAccess: [],
   providers: []
@@ -84,7 +85,7 @@ const MOCK_MANAGED_USERS: ManagedUser[] = Array.from({ length: 20 }, (_, i) => (
   lastName: ['Doe', 'Smith', 'Johnson', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson'][i % 8],
   email: `${['john', 'jane', 'alex', 'sarah', 'michael', 'emily', 'david', 'jessica'][i % 8]}.${i + 1}@example.com`,
   role: [UserRole.ADMIN, UserRole.AGENT, UserRole.MANAGEMENT, UserRole.CLINIC_STAFF, UserRole.CLINIC][i % 5],
-  department: ['Operations', 'Account Management', 'Billing', 'QA', 'Clinical', 'Front Desk'][i % 6],
+  department: ['Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'][i % 10],
   status: i === 15 ? 'Disabled' : i === 18 ? 'Archived' : 'Active',
   lastLogin: new Date(Date.now() - Math.random() * 1000000000).toISOString(),
   organization: 'MySage Global',
@@ -218,7 +219,7 @@ const UserManagement: React.FC = () => {
           </select>
           <select className="px-4 py-3 bg-gray-50 rounded-2xl outline-none font-bold text-sm text-gray-700 border-none min-w-[150px]">
             <option value="">Department</option>
-            {['Operations', 'Account Management', 'Billing', 'QA', 'Clinical', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
+            {['Department','Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
           </select>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-gray-50">
@@ -634,7 +635,7 @@ const UserManagement: React.FC = () => {
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Department *</label>
                     <select required className="w-full px-5 py-3 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold text-gray-700">
-                      {['Operations', 'Account Management', 'Billing', 'QA', 'Clinical', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                      {['Select Department','Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
                     </select>
                   </div>
                 </div>

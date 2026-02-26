@@ -44,9 +44,9 @@ const MOCK_CLINICS: Clinic[] = Array.from({ length: 20 }, (_, i) => ({
 
   // ✅ Add missing required fields (based on your Clinic type)
   medicarePtan: "",
+  medicaidId: "",   // new field
   insuranceCredentials: [],
   systemAccess: [],
-
   providers: []
 }));
 
@@ -56,7 +56,7 @@ const MOCK_USERS: ManagedUser[] = Array.from({ length: 15 }, (_, i) => ({
   lastName: ['Doe', 'Smith', 'Johnson', 'Williams', 'Brown'][i % 5],
   email: `user${i + 1}@example.com`,
   role: i % 3 === 0 ? 'Admin' as any : i % 2 === 0 ? 'Management' as any : 'Agent' as any,
-  department: ['Operations', 'Account Management', 'Billing', 'QA'][i % 4],
+  department: ['Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'][i % 10],
   status: 'Active',
   permissions: {}
 }));

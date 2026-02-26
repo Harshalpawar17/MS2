@@ -83,6 +83,7 @@ export interface Clinic {
   medicarePtan: string;
   insuranceCredentials: InsuranceCredential[];
   systemAccess: SystemAccess[];
+  medicaidId: string;
 }
 
 export interface Claim {
