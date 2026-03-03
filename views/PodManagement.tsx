@@ -65,7 +65,7 @@ const MOCK_PODS: Pod[] = Array.from({ length: 10 }, (_, i) => ({
   id: `pod-${i + 1}`,
   name: `POD ${i + 1} - ${['Enterprise', 'Small Business', 'Regional', 'Specialty'][i % 4]}`,
   description: `Management group for ${['Enterprise', 'Small Business', 'Regional', 'Specialty'][i % 4]} clinics in the ${['Northeast', 'Southeast', 'Midwest', 'West'][i % 4]} sector.`,
-  ownerId: `u-${(i % 5) + 1}`,
+  accountManagerId: `u-${(i % 5) + 1}`,
   clinicIds: MOCK_CLINICS.slice(i * 2, i * 2 + 3).map(c => c.id),
   userIds: MOCK_USERS.slice(i, i + 2).map(u => u.id),
   status: i === 8 ? 'Disabled' : i === 9 ? 'Archived' : 'Active',
@@ -171,7 +171,7 @@ const PodManagement: React.FC = () => {
             />
           </div>
           <select className="px-4 py-3 bg-gray-50 rounded-2xl outline-none font-bold text-sm text-gray-700 border-none min-w-[150px]">
-            <option value="">All Owners</option>
+            <option value="">All Account Managers</option>
             {MOCK_USERS.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
           </select>
           <select 
@@ -210,7 +210,7 @@ const PodManagement: React.FC = () => {
           <thead>
             <tr className="border-b border-gray-50">
               <th className="px-8 py-5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">POD Name</th>
-              <th className="px-8 py-5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Owner</th>
+              <th className="px-8 py-5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Account Manager</th>
               <th className="px-8 py-5 text-[10px] font-bold text-gray-400 uppercase tracking-widest"># Clinics</th>
               <th className="px-8 py-5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Status</th>
               <th className="px-8 py-5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Updated At</th>
@@ -239,7 +239,7 @@ const PodManagement: React.FC = () => {
                   <div className="flex items-center space-x-2">
                     <UserCircle size={16} className="text-gray-400" />
                     <span className="text-sm font-medium text-gray-700">
-                      {MOCK_USERS.find(u => u.id === pod.ownerId)?.firstName} {MOCK_USERS.find(u => u.id === pod.ownerId)?.lastName}
+                      {MOCK_USERS.find(u => u.id === pod.accountManagerId)?.firstName} {MOCK_USERS.find(u => u.id === pod.accountManagerId)?.lastName}
                     </span>
                   </div>
                 </td>
@@ -362,11 +362,11 @@ const PodManagement: React.FC = () => {
                       <p className="text-sm font-bold text-gray-900">{selectedPod.organization || 'N/A'}</p>
                     </div>
                     <div className="bg-gray-50 p-6 rounded-3xl space-y-2">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Owner</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Account Manager</p>
                       <div className="flex items-center space-x-2">
                         <UserCircle size={16} className="text-primary" />
                         <p className="text-sm font-bold text-gray-900">
-                          {MOCK_USERS.find(u => u.id === selectedPod.ownerId)?.firstName} {MOCK_USERS.find(u => u.id === selectedPod.ownerId)?.lastName}
+                          {MOCK_USERS.find(u => u.id === selectedPod.accountManagerId)?.firstName} {MOCK_USERS.find(u => u.id === selectedPod.accountManagerId)?.lastName}
                         </p>
                       </div>
                     </div>
@@ -515,7 +515,7 @@ const PodManagement: React.FC = () => {
                     {[
                       { action: 'POD Created', actor: 'Admin User', time: '30 days ago', details: 'Initial setup' },
                       { action: 'Clinics Added', actor: 'System', time: '15 days ago', details: 'Added 3 clinics via bulk import', diff: '+3' },
-                      { action: 'Owner Changed', actor: 'Admin User', time: '10 days ago', details: 'Transferred from u-5 to u-1', diff: 'u-5 → u-1' },
+                      { action: 'Account Manager Changed', actor: 'Admin User', time: '10 days ago', details: 'Transferred from u-5 to u-1', diff: 'u-5 → u-1' },
                       { action: 'Status Updated', actor: 'Jane Smith', time: '2 days ago', details: 'POD marked as Active', diff: 'Disabled → Active' }
                     ].map((log, i) => (
                       <div key={i} className="relative">
@@ -638,11 +638,11 @@ const PodManagement: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Owner</label>
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Account Manager</label>
                   <select className="w-full px-5 py-3 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold text-gray-700">
-                    <option value="">Select Owner...</option>
+                    <option value="">Select Account Manager...</option>
                     {MOCK_USERS.map(u => (
-                      <option key={u.id} value={u.id} selected={selectedPod?.ownerId === u.id}>
+                      <option key={u.id} value={u.id} selected={selectedPod?.accountManagerId === u.id}>
                         {u.firstName} {u.lastName}
                       </option>
                     ))}

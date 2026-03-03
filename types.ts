@@ -131,7 +131,8 @@ export interface Pod {
   id: string;
   name: string;
   description: string;
-  ownerId: string;
+  
+  accountManagerId: string;
   clinicIds: string[];
   userIds: string[];
   status: 'Active' | 'Disabled' | 'Archived';

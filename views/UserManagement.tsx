@@ -46,8 +46,6 @@ const MOCK_CLINICS: Clinic[] = Array.from({ length: 10 }, (_, i) => ({
   fax: `(555) 000-${2000 + i}`,
   npi: `12345678${i.toString().padStart(2, '0')}`,
   taxId: `98-76543${i.toString().padStart(2, '0')}`,
-
-  // ✅ required by Clinic type:
   medicarePtan: '',
   medicaidId: "",   // Added medicaidId as a required field with default empty value
   insuranceCredentials: [],
@@ -59,7 +57,7 @@ const MOCK_PODS: Pod[] = Array.from({ length: 5 }, (_, i) => ({
   id: `pod-${i + 1}`,
   name: `POD ${i + 1} - ${['Enterprise', 'Small Business', 'Regional', 'Specialty'][i % 4]}`,
   description: `Management group ${i + 1}`,
-  ownerId: `u-1`,
+  accountManagerId: `u-1`,
   clinicIds: [],
   userIds: [],
   status: 'Active',
@@ -109,7 +107,21 @@ const UserManagement: React.FC = () => {
   const [toast, setToast] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('Overview');
   const [userType, setUserType] = useState<UserRole>(UserRole.AGENT);
+  const [department, setDepartment] = useState('');
   const [permissions, setPermissions] = useState<Record<string, any>>(ROLE_TEMPLATES['Agent']);
+
+  const DEPT_TO_TEMPLATE: Record<string, string> = {
+    'Operations': 'Admin',
+    'EV': 'Agent',
+    'PA': 'Agent',
+    'QA': 'Agent',
+    'AR': 'Agent',
+    'Account Management': 'Manager',
+    'Billing': 'Agent',
+    'Provider': 'Agent',
+    'Charges & Payments': 'Agent',
+    'Front Desk': 'Frontdesk'
+  };
 
   const showToast = (message: string) => {
     setToast(message);
@@ -187,7 +199,7 @@ const UserManagement: React.FC = () => {
             <span>Role Templates</span>
           </button>
           <button 
-            onClick={() => { setSelectedUser(null); setUserType(UserRole.AGENT); setPermissions(ROLE_TEMPLATES['Agent']); setIsModalOpen(true); }}
+            onClick={() => { setSelectedUser(null); setUserType(UserRole.AGENT); setDepartment(''); setPermissions(ROLE_TEMPLATES['Agent']); setIsModalOpen(true); }}
             className="bg-primary text-white px-6 py-3 rounded-2xl shadow-lg shadow-primary/20 flex items-center space-x-2 hover:scale-105 transition-transform font-bold"
           >
             <Plus size={20} />
@@ -219,7 +231,7 @@ const UserManagement: React.FC = () => {
           </select>
           <select className="px-4 py-3 bg-gray-50 rounded-2xl outline-none font-bold text-sm text-gray-700 border-none min-w-[150px]">
             <option value="">Department</option>
-            {['Department','Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
+            {['Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
           </select>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-gray-50">
@@ -317,7 +329,7 @@ const UserManagement: React.FC = () => {
                       {user.status === 'Active' ? <Ban size={16} /> : <CheckCircle2 size={16} />}
                     </button>
                     <button 
-                      onClick={() => { setSelectedUser(user); setIsModalOpen(true); }}
+                      onClick={() => { setSelectedUser(user); setUserType(user.role); setDepartment(user.department); setPermissions(user.permissions); setIsModalOpen(true); }}
                       className="p-2 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
                       title="Edit"
                     >
@@ -559,7 +571,7 @@ const UserManagement: React.FC = () => {
             {/* Drawer Footer */}
             <div className="p-8 border-t border-gray-100 flex items-center space-x-4">
               <button 
-                onClick={() => { setIsDrawerOpen(false); setIsModalOpen(true); }}
+                onClick={() => { setIsDrawerOpen(false); setUserType(selectedUser.role); setDepartment(selectedUser.department); setPermissions(selectedUser.permissions); setIsModalOpen(true); }}
                 className="flex-1 bg-gray-900 text-white py-4 rounded-2xl font-bold hover:bg-gray-800 transition-all flex items-center justify-center space-x-2"
               >
                 <Edit2 size={18} />
@@ -578,7 +590,7 @@ const UserManagement: React.FC = () => {
 
       {/* Create/Edit User Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-start justify-center pt-8 pb-8 px-6">  
+        <div className="fixed inset-0 z-[60] flex items-start justify-center pt-8 pb-8 px-6">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
           <div className="relative w-full max-w-4xl max-h-[calc(100svh-4rem)] overflow-y-auto bg-white rounded-[40px] shadow-2xl">
             <div className="p-8 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
@@ -634,8 +646,20 @@ const UserManagement: React.FC = () => {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Department *</label>
-                    <select required className="w-full px-5 py-3 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold text-gray-700">
-                      {['Select Department','Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                    <select 
+                      required 
+                      value={department}
+                      onChange={(e) => {
+                        const newDept = e.target.value;
+                        setDepartment(newDept);
+                        if (DEPT_TO_TEMPLATE[newDept]) {
+                          applyTemplate(DEPT_TO_TEMPLATE[newDept]);
+                        }
+                      }}
+                      className="w-full px-5 py-3 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold text-gray-700"
+                    >
+                      <option value="">Select Department...</option>
+                      {['Operations', 'EV', 'PA', 'QA', 'AR', 'Account Management', 'Billing', 'Provider', 'Charges & Payments', 'Front Desk'].map(dept => <option key={dept} value={dept}>{dept}</option>)}
                     </select>
                   </div>
                 </div>
@@ -701,16 +725,6 @@ const UserManagement: React.FC = () => {
                     <Shield className="text-primary" size={20} />
                     <span>Permissions Matrix</span>
                   </h3>
-                  <div className="flex items-center space-x-3">
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Apply Template:</span>
-                    <select 
-                      onChange={(e) => applyTemplate(e.target.value)}
-                      className="px-4 py-2 bg-gray-50 rounded-xl outline-none font-bold text-xs text-primary border-none"
-                    >
-                      <option value="">Select Template...</option>
-                      {Object.keys(ROLE_TEMPLATES).map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
                 </div>
                 
                 <div className="bg-white rounded-3xl border border-gray-100 overflow-hidden">
