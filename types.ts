@@ -160,3 +160,37 @@ export interface ManagedUser {
   title?: string;
   phone?: string;
 }
+
+// Clinic Intake Config Types
+
+export interface CPTItem {
+  id: string;
+  code: string;
+  description: string;
+  notes?: string;
+  source: 'system' | 'custom';
+  active: boolean;
+  preSelected: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface BenefitCategory {
+  id: string;
+  name: string;
+  enabled: boolean;
+  preSelected: boolean; // Expanded by default
+  cpts: CPTItem[];
+  order: number;
+}
+
+export interface ClinicIntakeConfig {
+  clinicId: string;
+  categories: BenefitCategory[];
+  lastModifiedAt: string;
+  lastModifiedBy: string;
+  lastModifiedByEmail: string;
+  allowStaffCustomCPT: boolean;
+}

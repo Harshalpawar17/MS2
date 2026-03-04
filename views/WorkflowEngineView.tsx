@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -15,8 +15,14 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
   Handle,
+  MarkerType,
+  ConnectionLineType,
+  getSmoothStepPath,
+  BaseEdge,
+  EdgeLabelRenderer,
 } from "reactflow";
 import "reactflow/dist/style.css";
+import dagre from "dagre";
 import { toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 
@@ -34,17 +40,20 @@ import {
   GitBranch,
   PlayCircle,
   FileDown,
+  FileText,
   Settings2,
   Workflow as WorkflowIcon,
   Zap,
   UploadCloud,
   BadgeCheck,
+  GripVertical,
   Trash2,
   Copy,
   ArrowRight,
   ArrowLeft,
   Layers,
   Info,
+  Pencil,
 } from "lucide-react";
 
 /** -----------------------------
@@ -81,19 +90,35 @@ type Condition = { id: string; field: ConditionField; op: Operator; value?: stri
 type GroupOp = "AND" | "OR";
 type ConditionGroup = { id: string; groupOp: GroupOp; items: Condition[] };
 
-type ActionType = "SET_STATUS" | "AUTOFILL_FIELDS" | "ASSIGN_USER" | "SEND_EMAIL" | "SEND_FAX" | "EXPIRE" | "REQUEUE" | "API_CALL" | "GENERATE_PDF" | "REQUEUE_LIMIT_CHECK";
+type ActionType =
+  | "SET_STATUS"
+  | "AUTOFILL_FIELDS"
+  | "ASSIGN_USER"
+  | "SEND_EMAIL"
+  | "SEND_FAX"
+  | "EXPIRE"
+  | "REQUEUE"
+  | "API_CALL"
+  | "GENERATE_PDF"
+  | "REQUEUE_LIMIT_CHECK"
+  | "AUTO_CREATE_EV_ACCOUNT"
+  | "AUTO_CREATE_PA_ACCOUNT";
+
+type ActionIf = { ifGroup?: ConditionGroup | null };
 
 type WorkflowAction =
-  | { id: string; type: "SET_STATUS"; payload: { dispositionId: string } }
-  | { id: string; type: "AUTOFILL_FIELDS"; payload: { fields: { key: string; op: "IS" | "IS_NOT" | "EXISTS"; value: string }[] } }
-  | { id: string; type: "ASSIGN_USER"; payload: { mode: "ROLE" | "DEPARTMENT" | "PERSON"; value: string } }
-  | { id: string; type: "SEND_EMAIL"; payload: { templateId: string; to: "clinic" | "agent" | "qa" } }
-  | { id: string; type: "SEND_FAX"; payload: { templateId: string; to: string } }
-  | { id: string; type: "EXPIRE"; payload: { days: number } }
-  | { id: string; type: "REQUEUE"; payload: { delayHours: number; delayMinutes: number; hiddenFromQueue: boolean } }
-  | { id: string; type: "API_CALL"; payload: { method: "GET" | "POST" | "PUT" | "DELETE"; url: string; headers: string; body: string } }
-  | { id: string; type: "GENERATE_PDF"; payload: { templateName: string; saveToDocuments: boolean } }
-  | { id: string; type: "REQUEUE_LIMIT_CHECK"; payload: { maxCount: number; routeToResult: string } };
+  | ({ id: string; type: "SET_STATUS"; payload: { dispositionId: string } } & ActionIf)
+  | ({ id: string; type: "AUTOFILL_FIELDS"; payload: { fields: { key: string; op: "IS" | "IS_NOT" | "EXISTS"; value: string }[] } } & ActionIf)
+  | ({ id: string; type: "ASSIGN_USER"; payload: { mode: "ROLE" | "DEPARTMENT" | "PERSON"; value: string } } & ActionIf)
+  | ({ id: string; type: "SEND_EMAIL"; payload: { templateId: string; to: "clinic" | "agent" | "qa" } } & ActionIf)
+  | ({ id: string; type: "SEND_FAX"; payload: { templateId: string; to: string } } & ActionIf)
+  | ({ id: string; type: "EXPIRE"; payload: { days: number } } & ActionIf)
+  | ({ id: string; type: "REQUEUE"; payload: { delayHours: number; delayMinutes: number; hiddenFromQueue: boolean } } & ActionIf)
+  | ({ id: string; type: "API_CALL"; payload: { method: "GET" | "POST" | "PUT" | "DELETE"; url: string; headers: string; body: string } } & ActionIf)
+  | ({ id: string; type: "GENERATE_PDF"; payload: { templateName: string; saveToDocuments: boolean } } & ActionIf)
+  | ({ id: string; type: "REQUEUE_LIMIT_CHECK"; payload: { maxCount: number; routeToResult: string } } & ActionIf)
+  | ({ id: string; type: "AUTO_CREATE_EV_ACCOUNT"; payload: {} } & ActionIf)
+  | ({ id: string; type: "AUTO_CREATE_PA_ACCOUNT"; payload: {} } & ActionIf);
 
 type NodeKind = "TRIGGER" | "ACTION" | "DECISION" | "RESULTS" | "END";
 
@@ -227,13 +252,16 @@ function summarizeAction(a: WorkflowAction) {
   if (a.type === "AUTOFILL_FIELDS") return `Autofill ${a.payload.fields.length} field(s)`;
   if (a.type === "ASSIGN_USER") return `Assign → ${a.payload.mode}:${a.payload.value}`;
   if (a.type === "SEND_EMAIL") return `Email → ${a.payload.to} (template: ${a.payload.templateId})`;
-  if (a.type === "SEND_FAX") return `Fax → ${a.payload.to}`;
+  if (a.type === "SEND_FAX") return `Fax → ${a.payload.to} (template: ${a.payload.templateId})`;
   if (a.type === "EXPIRE") return `Expire in ${a.payload.days} day(s)`;
   if (a.type === "REQUEUE") return `Requeue ${a.payload.delayHours}h ${a.payload.delayMinutes}m`;
   if (a.type === "API_CALL") return `API ${a.payload.method} → ${a.payload.url}`;
   if (a.type === "GENERATE_PDF") return `Generate PDF: ${a.payload.templateName}`;
   if (a.type === "REQUEUE_LIMIT_CHECK") return `Requeue limit ≥ ${a.payload.maxCount}`;
-  return "Action";
+  if (a.type === "AUTO_CREATE_EV_ACCOUNT") return "Auto-create EV account";
+  if (a.type === "AUTO_CREATE_PA_ACCOUNT") return "Auto-create PA account";
+  const exhaustive: never = a;
+  return String(exhaustive).replace(/_/g, " ");
 }
 
 /** -----------------------------
@@ -395,15 +423,26 @@ function makeWorkflowMeta(accountType: AccountType, name: string, description: s
   };
 }
 
-function makeDispositionDefinition(results: ResultMapping[], dispositionName: string, queueName: string): WorkflowDefinition {
+function makeDispositionDefinition(
+  results: ResultMapping[],
+  dispositionName: string,
+  queueName: string
+): WorkflowDefinition {
   const trigId = uid();
+
+  // Visio-style default: Trigger on LEFT, Results stacked on RIGHT
+  const TRIGGER_X = 140;
+  const TRIGGER_Y = 240;
+  const RESULTS_X = 560;
+  const ROW_GAP_Y = 190;
+
   const triggerNode: any = {
     id: trigId,
     kind: "TRIGGER" as NodeKind,
     name: "Trigger: Disposition",
     actions: [],
     results: [],
-    _pos: { x: 400, y: 60 },
+    _pos: { x: TRIGGER_X, y: TRIGGER_Y },
     _subtitle: `${dispositionName} • Queue: ${queueName}`,
   };
 
@@ -411,8 +450,8 @@ function makeDispositionDefinition(results: ResultMapping[], dispositionName: st
     return { nodes: [triggerNode], edges: [] };
   }
 
-  const totalWidth = results.length * 280;
-  const startX = 400 - totalWidth / 2 + 140;
+  const totalHeight = (results.length - 1) * ROW_GAP_Y;
+  const startY = TRIGGER_Y - totalHeight / 2;
 
   const resultNodes: any[] = results.map((r, idx) => ({
     id: uid(),
@@ -421,7 +460,7 @@ function makeDispositionDefinition(results: ResultMapping[], dispositionName: st
     actions: [],
     results: [r.label],
     _resultMapping: r,
-    _pos: { x: startX + idx * 280, y: 260 },
+    _pos: { x: RESULTS_X, y: startY + idx * ROW_GAP_Y },
   }));
 
   const edges: HubEdge[] = resultNodes.map((rn, idx) => ({
@@ -436,6 +475,129 @@ function makeDispositionDefinition(results: ResultMapping[], dispositionName: st
   return { nodes: [triggerNode, ...resultNodes], edges };
 }
 
+function syncDispositionResultsIntoDraft(
+  prevDraft: WorkflowDefinition,
+  results: ResultMapping[],
+  dispositionName: string,
+  queueName: string
+): WorkflowDefinition {
+  const TRIGGER_X = 140;
+  const TRIGGER_Y = 240;
+  const RESULTS_X = 560;
+  const ROW_GAP_Y = 190;
+
+  const nodes: any[] = (prevDraft.nodes || []).map((n) => ({ ...(n as any) }));
+  const edges: any[] = (prevDraft.edges || []).map((e) => ({ ...(e as any) }));
+
+  // Find (or create) trigger node
+  let trigger = nodes.find((n) => n.kind === "TRIGGER");
+  if (!trigger) {
+    trigger = {
+      id: uid(),
+      kind: "TRIGGER" as NodeKind,
+      name: "Trigger: Disposition",
+      actions: [],
+      results: [],
+      _pos: { x: TRIGGER_X, y: TRIGGER_Y },
+      _subtitle: `${dispositionName} • Queue: ${queueName}`,
+    };
+  }
+
+  trigger.name = "Trigger: Disposition";
+  trigger._subtitle = `${dispositionName} • Queue: ${queueName}`;
+  trigger._pos = { x: TRIGGER_X, y: TRIGGER_Y };
+
+  const trigId = String(trigger.id);
+
+  // Existing RESULT nodes keyed by resultMapping.id (stable)
+  const existingResults = nodes.filter((n) => n.kind === "RESULTS" && n._resultMapping?.id);
+  const byMappingId = new Map<string, any>(
+    existingResults.map((n) => [String(n._resultMapping.id), n])
+  );
+
+  const keepMappingIds = new Set(results.map((r) => String(r.id)));
+
+  // Removed RESULT nodes (must delete + remove their edges)
+  const removedNodeIds = new Set<string>(
+    existingResults
+      .filter((n) => !keepMappingIds.has(String(n._resultMapping.id)))
+      .map((n) => String(n.id))
+  );
+
+  // Build ordered RESULT nodes (reuse where possible)
+  const orderedResultNodes: any[] = results.map((r) => {
+    const existing = byMappingId.get(String(r.id));
+    if (existing) {
+      return {
+        ...existing,
+        name: `Result: ${r.label}`,
+        results: [r.label],
+        _resultMapping: { ...r },
+      };
+    }
+    return {
+      id: uid(),
+      kind: "RESULTS" as NodeKind,
+      name: `Result: ${r.label}`,
+      actions: [],
+      results: [r.label],
+      _resultMapping: { ...r },
+      _pos: { x: 0, y: 0 },
+    };
+  });
+
+  // Position result nodes in Visio-style stack
+  const totalHeight = (orderedResultNodes.length - 1) * ROW_GAP_Y;
+  const startY = TRIGGER_Y - totalHeight / 2;
+  orderedResultNodes.forEach((rn, idx) => {
+    rn._pos = { x: RESULTS_X, y: startY + idx * ROW_GAP_Y };
+  });
+
+  // Remove all old RESULTS nodes, re-add ordered ones
+  const nonResultNodes = nodes.filter((n) => n.kind !== "RESULTS" && String(n.id) !== trigId);
+  const finalNodes = [trigger, ...nonResultNodes, ...orderedResultNodes];
+
+  // Remove edges connected to removed RESULT nodes
+  let finalEdges = edges.filter(
+    (e) =>
+      !removedNodeIds.has(String(e.source)) &&
+      !removedNodeIds.has(String(e.target))
+  );
+
+  // Ensure trigger->result edges exist and priority reflects order
+  const resultNodeIds = new Set(orderedResultNodes.map((n) => String(n.id)));
+
+  // Drop stale trigger->result edges that point to non-existing result nodes
+  finalEdges = finalEdges.filter((e) => {
+    if (String(e.source) !== trigId) return true;
+    // if it's not pointing to a current RESULT node, remove it
+    return resultNodeIds.has(String(e.target)) || nodes.some((n) => String(n.id) === String(e.target));
+  });
+
+  orderedResultNodes.forEach((rn, idx) => {
+    const existingEdge = finalEdges.find(
+      (e) => String(e.source) === trigId && String(e.target) === String(rn.id)
+    );
+
+    if (existingEdge) {
+      existingEdge.priority = idx + 1;
+      existingEdge.label = rn.results?.[0] || "Next";
+      existingEdge.conditionGroup = existingEdge.conditionGroup ?? null;
+    } else {
+      finalEdges.push({
+        id: uid(),
+        source: trigId,
+        target: rn.id,
+        priority: idx + 1,
+        label: rn.results?.[0] || "Next",
+        conditionGroup: null,
+      } as HubEdge);
+    }
+  });
+
+  return { ...prevDraft, nodes: finalNodes, edges: finalEdges };
+}
+
 /** -----------------------------
  *  Simulation (graph walk like HubSpot branches)
  *  ----------------------------- */
@@ -448,14 +610,24 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
   const start = def.nodes.find((n) => n.kind === "TRIGGER") || def.nodes[0];
   if (!start) return { ok: false as const, reason: "Workflow has no nodes." };
 
+  const runNodeActions = (node: HubNode) => {
+    for (const a of node.actions || []) {
+      // Action-level IF/THEN (ifGroup). If not present -> run.
+      const g = a.ifGroup ?? null;
+      if (g && !groupMatches(g, inputs)) continue;
+
+      executed.push(a);
+
+      if (a.type === "SET_STATUS") finalStatus = a.payload.dispositionId;
+      if (a.type === "ASSIGN_USER") assignedTo = `${a.payload.mode}:${a.payload.value}`;
+    }
+  };
+
   let current = start;
   let lastPath: { from: string; to: string; edgeLabel?: string } | null = null;
 
-  for (const a of current.actions) {
-    executed.push(a);
-    if (a.type === "SET_STATUS") finalStatus = a.payload.dispositionId;
-    if (a.type === "ASSIGN_USER") assignedTo = `${a.payload.mode}:${a.payload.value}`;
-  }
+  // Run trigger node actions (if any)
+  runNodeActions(current);
 
   while (current && current.kind !== "END") {
     if (visited.has(current.id)) {
@@ -485,7 +657,9 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
       return groupMatches(g, inputs);
     });
 
-    const elseEdge = outgoing.find((e) => !e.conditionGroup || (e.conditionGroup.items?.length ?? 0) === 0) || null;
+    const elseEdge =
+      outgoing.find((e) => !e.conditionGroup || (e.conditionGroup.items?.length ?? 0) === 0) || null;
+
     const chosen = matchingIf || elseEdge;
 
     if (!chosen) {
@@ -502,11 +676,8 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
     const next = def.nodes.find((n) => n.id === chosen.target);
     if (!next) return { ok: false as const, reason: "Edge points to missing node.", executed, finalStatus, assignedTo };
 
-    for (const a of next.actions) {
-      executed.push(a);
-      if (a.type === "SET_STATUS") finalStatus = a.payload.dispositionId;
-      if (a.type === "ASSIGN_USER") assignedTo = `${a.payload.mode}:${a.payload.value}`;
-    }
+    // Run next node actions (respect action-level ifGroup)
+    runNodeActions(next);
 
     lastPath = { from: current.name, to: next.name, edgeLabel: chosen.label };
 
@@ -536,21 +707,43 @@ const Modal: React.FC<{
   onClose: () => void;
   children: React.ReactNode;
 }> = ({ title, open, onClose, children }) => {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
   if (!open) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-3xl bg-white rounded-[32px] border border-gray-100 shadow-2xl p-8">
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div>
-            <h3 className="text-xl font-bold text-primaryText">{title}</h3>
-            <p className="text-sm text-secondary font-medium">Complete details and click Save.</p>
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/30" onClick={onClose} />
+
+      <div className="min-h-full flex items-start justify-center px-4 py-8">
+        <div className="relative z-10 w-full max-w-3xl bg-white rounded-[32px] border border-gray-100 shadow-2xl overflow-hidden">
+          <div className="flex items-start justify-between gap-4 p-8 pb-6 border-b border-gray-100">
+            <div>
+              <h3 className="text-xl font-bold text-primaryText">{title}</h3>
+              <p className="text-sm text-secondary font-medium">
+                Complete details and click Save.
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl hover:bg-gray-100 transition"
+              aria-label="Close"
+            >
+              <X size={20} className="text-secondary" />
+            </button>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 transition" aria-label="Close">
-            <X size={20} className="text-secondary" />
-          </button>
+
+          <div className="p-8 pt-6 max-h-[calc(100vh-220px)] overflow-y-auto">
+            {children}
+          </div>
         </div>
-        {children}
       </div>
     </div>
   );
@@ -734,51 +927,84 @@ function nodeIcon(kind: NodeKind) {
 const HubNodeCard: React.FC<NodeProps<any>> = ({ data, selected }) => {
   const kind: NodeKind = data.kind;
   const title: string = data.name;
-  const subtitle: string =
-    kind === "ACTION" ? `${(data.actions?.length || 0).toString()} action(s)` : kind === "DECISION" ? "IF / ELSE branches" : kind === "RESULTS" ? `${(data.results?.length || 0).toString()} outcome(s)` : kind === "TRIGGER" && data._subtitle ? data._subtitle : " ";
   const results: string[] = data.results || [];
-  const mapping: ResultMapping | null = data._resultMapping || null;
+  const actions: WorkflowAction[] = data.actions || [];
+
+  const baseHandleStyle: React.CSSProperties = {
+    width: 18,
+    height: 18,
+    borderRadius: 6, // more “Visio-like” than circles
+    border: "2px solid #3B82F6",
+    background: "#EFF6FF",
+    boxShadow: "0 0 0 2px rgba(59,130,246,0.15)",
+    cursor: "crosshair",
+  };
+
+  const badgeForAction = (a: WorkflowAction) => {
+    if (a.type === "GENERATE_PDF") return `PDF: ${a.payload.templateName || ""}`;
+    if (a.type === "SEND_EMAIL") return "Email";
+    if (a.type === "SEND_FAX") return "Fax";
+    if (a.type === "AUTO_CREATE_EV_ACCOUNT") return "Auto EV";
+    if (a.type === "AUTO_CREATE_PA_ACCOUNT") return "Auto PA";
+    return a.type.replace(/_/g, " ");
+  };
+
+  const actionBadges = kind === "ACTION" ? actions.slice(0, 3).map(badgeForAction) : [];
 
   return (
     <div
-      className={`min-w-[220px] max-w-[260px] rounded-2xl border shadow-sm bg-white ${selected ? "border-primary ring-2 ring-primary/20" : "border-gray-100"
-        }`}
+      className={`relative rounded-2xl border bg-white px-3 py-3 w-[240px] ${
+        selected ? "border-primary ring-2 ring-primary/20" : "border-gray-200"
+      }`}
     >
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {nodeIcon(kind)}
-          <div className="text-sm font-bold text-primaryText">{title}</div>
-        </div>
-        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">{nodeBadge(kind)}</span>
-      </div>
-      <div className="px-4 py-3 space-y-2">
-        <div className="text-xs text-secondary font-medium">{subtitle}</div>
-        {results.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {results.map((r, i) => (
-              <span key={i} className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{r}</span>
-            ))}
-          </div>
-        )}
-        {kind === "RESULTS" && mapping && (
-          <div className={`text-[10px] font-bold px-2 py-1 rounded-lg mt-1 inline-block ${mapping.nextType === "end" ? "bg-green-50 text-green-700 border border-green-200"
-            : mapping.nextType === "disposition" ? "bg-blue-50 text-blue-700 border border-blue-200"
-              : "bg-orange-50 text-orange-600 border border-orange-200"
-            }`}>
-            {mapping.nextType === "end" ? `→ End${mapping.conditions?.items?.length ? ` (${mapping.conditions.items.length} IF)` : ""}` : mapping.nextType === "disposition" ? `→ ${mapping.nextDispositionId ? "Mapped" : "Not Mapped"}${mapping.conditions?.items?.length ? ` (${mapping.conditions.items.length} IF)` : ""}` : "⚠ Not Mapped"}
-          </div>
-        )}
+      {/* MAIN TARGET HANDLE */}
+      <Handle type="target" position={Position.Left} style={baseHandleStyle} />
+
+      {/* MAIN SOURCE HANDLE (for non-results nodes) */}
+      {kind !== "RESULTS" && (
+        <Handle type="source" position={Position.Right} style={baseHandleStyle} />
+      )}
+
+      <div className="flex justify-between items-center mb-2">
+        <div className="text-sm font-bold text-primaryText">{title}</div>
+        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">
+          {nodeBadge(kind)}
+        </span>
       </div>
 
-      {/* ReactFlow handles */}
-      <div className="relative">
-        <div className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <Handle type="target" position={Position.Left} />
+      {/* Action badges visible on canvas (manager request) */}
+      {actionBadges.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {actionBadges.map((b, idx) => (
+            <span
+              key={idx}
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-50 border border-gray-100 text-secondary"
+            >
+              {b}
+            </span>
+          ))}
         </div>
-        <div className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2">
-          <Handle type="source" position={Position.Right} />
+      )}
+
+      {/* RESULTS node: one connector per outcome */}
+      {kind === "RESULTS" && results.length > 0 && (
+        <div className="space-y-2 mt-2">
+          {results.map((r, idx) => (
+            <div
+              key={idx}
+              className="relative w-full px-2 py-1.5 rounded-xl bg-gray-50 border border-gray-100 text-xs font-bold text-primaryText"
+            >
+              {r}
+              <Handle
+                type="source"
+                id={`result:${idx}`}
+                position={Position.Right}
+                style={baseHandleStyle}
+              />
+            </div>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -789,34 +1015,128 @@ const nodeTypes = { hubNode: HubNodeCard };
  *  ReactFlow: Custom Edge
  *  ----------------------------- */
 const HubEdgeView: React.FC<EdgeProps<any>> = (props) => {
-  const { id, sourceX, sourceY, targetX, targetY, markerEnd, data } = props;
+  const {
+    id,
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+    markerEnd,
+    data,
+    selected,
+  } = props;
+
   const label = data?.label || "Next";
   const priority = data?.priority ?? 1;
   const isElse = data?.isElse ?? false;
   const resultLabel = data?.resultLabel || "";
 
-  const midX = (sourceX + targetX) / 2;
-  const midY = (sourceY + targetY) / 2;
+  // Visio-style: orthogonal (right-angle) routing, with straight segments
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+    borderRadius: 0, // 0 = sharp corners (Visio-like)
+    offset: 28,
+  });
 
-  const path = `M ${sourceX} ${sourceY} C ${sourceX + 80} ${sourceY} ${targetX - 80} ${targetY} ${targetX} ${targetY}`;
+  const stroke = selected ? "#2563EB" : "#94A3B8"; // blue on select, slate otherwise
   const displayLabel = resultLabel ? `${label} • ${resultLabel}` : `${label} • P${priority}`;
 
   return (
     <>
-      <path id={id} d={path} fill="none" strokeWidth={2} stroke="#CBD5E1" markerEnd={markerEnd} />
-      <foreignObject x={midX - 80} y={midY - 18} width={160} height={36} requiredExtensions="http://www.w3.org/1999/xhtml">
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          stroke,
+          strokeWidth: 2,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          strokeDasharray: isElse ? "6 4" : undefined,
+        }}
+      />
+
+      <EdgeLabelRenderer>
         <div
-          className={`w-full h-full flex items-center justify-center rounded-full border text-[11px] font-bold ${isElse ? "bg-gray-50 border-gray-200 text-secondary" : "bg-white border-gray-200 text-primaryText"
-            }`}
+          style={{
+            position: "absolute",
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: "none",
+          }}
         >
-          {displayLabel}
+          <div
+            className={`px-2.5 py-1 rounded-full border text-[11px] font-bold shadow-sm ${
+              isElse
+                ? "bg-gray-50 border-gray-200 text-secondary"
+                : "bg-white border-gray-200 text-primaryText"
+            }`}
+          >
+            {displayLabel}
+          </div>
         </div>
-      </foreignObject>
+      </EdgeLabelRenderer>
     </>
   );
 };
 
 const edgeTypes = { hubEdge: HubEdgeView };
+
+/** -----------------------------
+ *  Visio-like auto layout (Dagre)
+ *  - Gives straight columns/rows and reduces criss-cross connectors.
+ *  - Triggered by "Auto Layout" button in the toolbar.
+ *  ----------------------------- */
+const VISIO_NODE_WIDTH = 240;  // matches HubNodeCard width
+const VISIO_NODE_HEIGHT = 160; // safe average for layout purposes
+
+function getLayoutedElements(
+  nodes: Node[],
+  edges: Edge[],
+  direction: "LR" | "TB" = "LR"
+): { nodes: Node[]; edges: Edge[] } {
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({
+    rankdir: direction,
+    ranksep: 140,
+    nodesep: 90,
+    edgesep: 25,
+    marginx: 40,
+    marginy: 40,
+  });
+
+  nodes.forEach((n) => {
+    g.setNode(n.id, { width: VISIO_NODE_WIDTH, height: VISIO_NODE_HEIGHT });
+  });
+
+  edges.forEach((e) => {
+    if (e.source && e.target) g.setEdge(e.source, e.target);
+  });
+
+  dagre.layout(g);
+
+  const layouted = nodes.map((n) => {
+    const p = g.node(n.id);
+    if (!p) return n;
+    return {
+      ...n,
+      position: {
+        x: p.x - VISIO_NODE_WIDTH / 2,
+        y: p.y - VISIO_NODE_HEIGHT / 2,
+      },
+    };
+  });
+
+  return { nodes: layouted, edges };
+}
+
 
 /** -----------------------------
  *  Map between WorkflowDefinition <-> ReactFlow
@@ -835,7 +1155,20 @@ function toFlowNodes(def: WorkflowDefinition): Node[] {
 function toFlowEdges(def: WorkflowDefinition): Edge[] {
   return def.edges.map((e) => {
     const isElse = !e.conditionGroup || (e.conditionGroup.items?.length ?? 0) === 0;
-    return { id: e.id, source: e.source, target: e.target, type: "hubEdge", data: { label: e.label, priority: e.priority, isElse } };
+
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: "hubEdge",
+      markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#94A3B8" },
+      data: {
+        label: e.label,
+        priority: e.priority,
+        isElse,
+        resultLabel: e.resultLabel || "",
+      },
+    };
   });
 }
 
@@ -850,10 +1183,22 @@ function fromFlow(nodes: Node[], edges: Edge[], prevDef: WorkflowDefinition): Wo
   const hubEdges: HubEdge[] = edges.map((e) => {
     const prev = prevDef.edges.find((x) => x.id === e.id);
     const data: any = e.data || {};
-    const label = String(data.label || prev?.label || "Next");
-    const priority = Number(data.priority || prev?.priority || 1);
 
-    return { id: e.id, source: e.source, target: e.target, label, priority, conditionGroup: prev?.conditionGroup ?? null };
+    const label = String(data.label ?? prev?.label ?? "Next");
+    const priority = Number(data.priority ?? prev?.priority ?? 1);
+
+    const rlRaw = data.resultLabel ?? prev?.resultLabel ?? "";
+    const resultLabel = String(rlRaw || "").trim() || undefined;
+
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      label,
+      priority,
+      conditionGroup: prev?.conditionGroup ?? null,
+      resultLabel,
+    };
   });
 
   return { nodes: hubNodes, edges: hubEdges };
@@ -921,7 +1266,18 @@ const DEFAULT_DISPOSITIONS: Disposition[] = [
   { id: "disp-29", code: 105, name: "Patient Requires New PA - Call", queue: "Authorizations", enabled: true, outcomeTag: "—", results: [] },
 ];
 
-type TopTabKey = "Queues" | "Dispositions" | "workflows" | "triggers" | "builder" | "test" | "audit" | "emailTemplates" | "faxTemplates" | "documents";
+type TopTabKey =
+  | "Queues"
+  | "Dispositions"
+  | "workflows"
+  | "triggers"
+  | "builder"
+  | "test"
+  | "audit"
+  | "emailTemplates"
+  | "faxTemplates"
+  | "pdfTemplates"
+  | "documents";
 type DispositionTabKey = "triggers" | "builder" | "test" | "audit";
 
 type DispositionWorkflowState = {
@@ -938,6 +1294,8 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TopTabKey>("Queues");
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [showAddDisposition, setShowAddDisposition] = useState(false);
+  const [showEditDisposition, setShowEditDisposition] = useState(false);
+  const [editDispositionId, setEditDispositionId] = useState<string | null>(null);
   const [showAddQueue, setShowAddQueue] = useState(false);
 
   // Queues (localStorage-persisted)
@@ -951,6 +1309,16 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
 
   // Dispositions (localStorage-persisted)
   const [dispositions, setDispositions] = useLs<Disposition[]>("wfe_dispositions", DEFAULT_DISPOSITIONS);
+  const editingDisposition = useMemo(() => {
+  if (!editDispositionId) return null;
+    return dispositions.find((d) => d.id === editDispositionId) || null;
+  }, [editDispositionId, dispositions]);
+
+  const closeEditDisposition = () => {
+    setShowEditDisposition(false);
+    setEditDispositionId(null);
+  };
+
   const [dispositionSearch, setDispositionSearch] = useState("");
 
   // Normal workflow mgmt (localStorage-persisted)
@@ -963,8 +1331,10 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
   const [auditLogs, setAuditLogs] = useLs<WorkflowAuditLog[]>("wfe_auditLogs", []);
 
   // Template & Document state
-  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(MOCK_EMAIL_TEMPLATES);
-  const [faxTemplates, setFaxTemplates] = useState<FaxTemplate[]>(MOCK_FAX_TEMPLATES);
+  const [emailTemplates, setEmailTemplates] = useLs<EmailTemplate[]>("wfe_emailTemplates", MOCK_EMAIL_TEMPLATES);
+  const [faxTemplates, setFaxTemplates] = useLs<FaxTemplate[]>("wfe_faxTemplates", MOCK_FAX_TEMPLATES);
+  const [pdfTemplates, setPdfTemplates] = useLs<{ id: string; name: string; body: string }[]>("wfe_pdfTemplates", []);
+  const [showAddPdfTemplate, setShowAddPdfTemplate] = useState(false);
   const [documents] = useState<DocRecord[]>(MOCK_DOCUMENTS);
   const [showAddEmailTemplate, setShowAddEmailTemplate] = useState(false);
   const [showAddFaxTemplate, setShowAddFaxTemplate] = useState(false);
@@ -1089,7 +1459,43 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
   const getOrCreateDispositionWorkflow = useCallback(
     (dispositionId: string) => {
       const existing = dispWorkflowByDispositionId[dispositionId];
-      if (existing) return existing;
+      if (existing) {
+        const d = dispositions.find((x) => x.id === dispositionId);
+        if (!d) return existing;
+
+        const draftResultSig = (existing.draft.nodes || [])
+          .filter((n: any) => n.kind === "RESULTS")
+          .map((n: any) => `${String(n._resultMapping?.id || "")}:${String(n.results?.[0] || "")}`)
+          .join("|");
+
+        const dispResultSig = (d.results || [])
+          .map((r) => `${String(r.id)}:${String(r.label)}`)
+          .join("|");
+
+        // If results changed (add/edit/reorder), sync draft to match and re-layout
+        if (draftResultSig !== dispResultSig) {
+          const t = nowIso();
+          const nextDraft = syncDispositionResultsIntoDraft(
+            existing.draft,
+            d.results || [],
+            d.name || "Disposition",
+            d.queue || ""
+          );
+
+          const updated = {
+            ...existing,
+            name: `Disposition: ${d.name}`,
+            description: `Queue: ${d.queue} • Code: ${d.code}`,
+            updatedAt: t,
+            draft: nextDraft,
+          };
+
+          setDispWorkflowByDispositionId((prev) => ({ ...prev, [dispositionId]: updated }));
+          return updated;
+        }
+
+        return existing;
+      }
 
       const d = dispositions.find((x) => x.id === dispositionId);
       const wfName = d ? `Disposition: ${d.name}` : "Disposition Workflow";
@@ -1307,8 +1713,12 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
     () => [
       { key: "Queues" as const, label: "Queues", icon: <Layers size={18} />, desc: "Select a queue first (then Dispositions are filtered by that queue)" },
       { key: "Dispositions" as const, label: "Dispositions", icon: <Layers size={18} />, desc: "Queue → Dispositions (row click opens disposition workflow builder)" },
+      // { key: "workflows" as const, label: "Workflows", icon: <WorkflowIcon size={18} />, desc: "Create and manage workflows per account type" },
+      // { key: "triggers" as const, label: "Triggers", icon: <Zap size={18} />, desc: "HubSpot-style enrollment rules (when records enter workflow)" },
+      // { key: "builder" as const, label: "Builder", icon: <GitBranch size={18} />, desc: "Visual canvas: drag nodes, connect arrows, IF/ELSE branches" },
       { key: "emailTemplates" as const, label: "Email Templates", icon: <FileDown size={18} />, desc: "Manage email templates used in workflow actions" },
       { key: "faxTemplates" as const, label: "Fax Templates", icon: <FileDown size={18} />, desc: "Manage fax templates used in workflow actions" },
+      { key: "pdfTemplates" as const, label: "PDF Templates", icon: <FileText size={18} />, desc: "Manage PDF templates used in workflow actions" },
       { key: "documents" as const, label: "Documents", icon: <ClipboardList size={18} />, desc: "Generated documents and file storage" },
       { key: "test" as const, label: "Test", icon: <PlayCircle size={18} />, desc: "Simulate execution: chosen path, actions, final status" },
       { key: "audit" as const, label: "Audit Logs", icon: <ClipboardList size={18} />, desc: "History per entity + export CSV" },
@@ -1379,7 +1789,16 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
           )}
 
           {dispMode.tab === "builder" && (
-            <BuilderCanvasSection workflow={selectedDispWorkflow} published={selectedDispPublished} onDraftChange={updateDispDraft} onPublish={publishDispNewVersion} dispositions={dispositions} emailTemplates={emailTemplates} faxTemplates={faxTemplates} />
+            <BuilderCanvasSection
+              workflow={selectedDispWorkflow}
+              published={selectedDispPublished}
+              onDraftChange={updateDispDraft}
+              onPublish={publishDispNewVersion}
+              dispositions={dispositions}
+              emailTemplates={emailTemplates}
+              faxTemplates={faxTemplates}
+              pdfTemplates={pdfTemplates}
+            />
           )}
 
           {dispMode.tab === "test" && (() => {
@@ -1516,6 +1935,10 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
         {/* Header */}
         <div className="flex flex-col space-y-2">
           <h1 className="text-3xl font-bold text-primaryText">Workflow Engine</h1>
+          {/* <p className="text-secondary font-medium">
+            HubSpot-style builder: <span className="font-bold text-primaryText">left actions</span> +{" "}
+            <span className="font-bold text-primaryText">visual branches/arrows</span> + triggers + versions + audit.
+          </p> */}
         </div>
 
         {/* Tabs */}
@@ -1576,6 +1999,10 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
             searchValue={dispositionSearch}
             onSearchChange={setDispositionSearch}
             onAdd={() => setShowAddDisposition(true)}
+            onEdit={(id) => {
+              setEditDispositionId(id);
+              setShowEditDisposition(true);
+            }}
             onToggleEnabled={(id) => setDispositions((prev) => prev.map((d) => (d.id === id ? { ...d, enabled: !d.enabled } : d)))}
             onRowClick={(id) => openDispositionWorkflow(id)}
           />
@@ -1599,7 +2026,16 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
         {activeTab === "triggers" && <TriggersSection workflow={selectedWorkflow} onGoWorkflows={() => setActiveTab("workflows")} onChange={updateEnrollment} />}
 
         {activeTab === "builder" && (
-          <BuilderCanvasSection workflow={selectedWorkflow} published={selectedPublished} onDraftChange={updateDraft} onPublish={publishNewVersion} dispositions={dispositions} emailTemplates={emailTemplates} faxTemplates={faxTemplates} />
+          <BuilderCanvasSection
+            workflow={selectedWorkflow}
+            published={selectedPublished}
+            onDraftChange={updateDraft}
+            onPublish={publishNewVersion}
+            dispositions={dispositions}
+            emailTemplates={emailTemplates}
+            faxTemplates={faxTemplates}
+            pdfTemplates={pdfTemplates}
+          />
         )}
 
         {activeTab === "test" && (
@@ -1621,6 +2057,14 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
 
         {activeTab === "faxTemplates" && (
           <FaxTemplatesSection templates={faxTemplates} onAdd={() => setShowAddFaxTemplate(true)} onDelete={(id) => setFaxTemplates((prev) => prev.filter((t) => t.id !== id))} />
+        )}
+
+        {activeTab === "pdfTemplates" && (
+          <PdfTemplatesSection
+            templates={pdfTemplates}
+            onAdd={() => setShowAddPdfTemplate(true)}
+            onDelete={(id) => setPdfTemplates((prev) => prev.filter((t) => t.id !== id))}
+          />
         )}
 
         {activeTab === "documents" && <DocumentsSection documents={documents} />}
@@ -1648,14 +2092,15 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
         </Modal>
 
         <Modal title="Add Disposition" open={showAddDisposition} onClose={() => setShowAddDisposition(false)}>
-          <AddDispositionForm
+          <DispositionForm
+            mode="add"
             selectedQueueName={selectedQueue?.name || ""}
             onCancel={() => setShowAddDisposition(false)}
             onSave={(payload) => {
               const maxCode = dispositions.reduce((max, d) => Math.max(max, d.code), 0);
               const newRow: Disposition = { id: uid(), code: maxCode + 1, ...payload };
               setDispositions((prev) => [newRow, ...prev]);
-              // Audit log: disposition created
+
               setAuditLogs((prev) => [{
                 id: uid(), createdAt: nowIso(), accountType: selectedAccountType,
                 workflowId: "SYSTEM", workflowName: "Disposition CRUD", workflowVersion: 0,
@@ -1664,15 +2109,98 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
                 finalStatus: "Created", assignedTo: "",
                 notes: `Disposition "${newRow.name}" created in queue "${newRow.queue}" with ${newRow.results.length} result(s).`,
               }, ...prev]);
+
               setShowAddDisposition(false);
             }}
           />
+        </Modal>
+
+        <Modal title="Edit Disposition" open={showEditDisposition} onClose={closeEditDisposition}>
+          {editingDisposition ? (
+            <DispositionForm
+              mode="edit"
+              selectedQueueName={editingDisposition.queue}
+              initialDisposition={editingDisposition}
+              onCancel={closeEditDisposition}
+              onSave={(payload) => {
+                const disp = editingDisposition;
+                if (!disp) return;
+
+                const results = payload.results ?? [];
+
+                // 1) Update Disposition list
+                setDispositions((prev) =>
+                  prev.map((d) => (d.id === disp.id ? { ...d, ...payload, results } : d))
+                );
+
+                // 2) ✅ Sync builder draft so results appear Trigger(left) -> Results(right) stacked (Visio-style)
+                //    (Requires: syncDispositionResultsIntoDraft helper already added in the same file)
+                setDispWorkflowByDispositionId((prev) => {
+                  const wf = prev[disp.id];
+                  if (!wf) return prev;
+
+                  const t = nowIso();
+                  const nextDraft = syncDispositionResultsIntoDraft(
+                    wf.draft,
+                    results,
+                    payload.name || disp.name,
+                    payload.queue || disp.queue
+                  );
+
+                  return {
+                    ...prev,
+                    [disp.id]: {
+                      ...wf,
+                      name: `Disposition: ${payload.name || disp.name}`,
+                      description: `Queue: ${payload.queue || disp.queue} • Code: ${disp.code}`,
+                      updatedAt: t,
+                      draft: nextDraft,
+                    },
+                  };
+                });
+
+                // 3) Audit log
+                setAuditLogs((prev) => [
+                  {
+                    id: uid(),
+                    createdAt: nowIso(),
+                    accountType: selectedAccountType,
+                    workflowId: "SYSTEM",
+                    workflowName: "Disposition CRUD",
+                    workflowVersion: 0,
+                    entityId: disp.id,
+                    triggerType: "RULE_ENGINE",
+                    chosenPath: null,
+                    executedActions: [],
+                    finalStatus: "Updated",
+                    assignedTo: "",
+                    notes: `Disposition "${payload.name}" updated. Results count: ${results.length}.`,
+                  },
+                  ...prev,
+                ]);
+
+                closeEditDisposition();
+              }}
+            />
+          ) : (
+            <div className="text-sm text-secondary">No disposition selected.</div>
+          )}
         </Modal>
 
         <Modal title="Add Email Template" open={showAddEmailTemplate} onClose={() => setShowAddEmailTemplate(false)}>
           <AddEmailTemplateForm
             onCancel={() => setShowAddEmailTemplate(false)}
             onSave={(t) => { setEmailTemplates((prev) => [t, ...prev]); setShowAddEmailTemplate(false); }}
+          />
+        </Modal>
+
+        <Modal title="Add PDF Template" open={showAddPdfTemplate} onClose={() => setShowAddPdfTemplate(false)}>
+          <AddPdfTemplateForm
+            onCancel={() => setShowAddPdfTemplate(false)}
+            onSave={(t) => {
+              setPdfTemplates((prev) => [t, ...prev]);
+              setShowAddPdfTemplate(false);
+            }}
           />
         </Modal>
 
@@ -2068,6 +2596,38 @@ const FaxTemplatesSection: React.FC<{ templates: FaxTemplate[]; onAdd: () => voi
 /** -----------------------------
  *  Documents Section
  *  ----------------------------- */
+const PdfTemplatesSection: React.FC<{ templates: { id: string; name: string; body: string }[]; onAdd: () => void; onDelete: (id: string) => void }> = ({ templates, onAdd, onDelete }) => (
+  <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-4">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <FileText size={20} className="text-primary" />
+        <h2 className="text-lg font-bold text-primaryText">PDF Templates</h2>
+        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-primary/10 text-primary">{templates.length}</span>
+      </div>
+      <button onClick={onAdd} className="px-4 py-2.5 rounded-2xl bg-primary text-white font-bold hover:opacity-95 shadow-lg shadow-primary/20 transition text-sm inline-flex items-center gap-2">
+        <Plus size={16} /> Add Template
+      </button>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="border-b border-gray-100 text-left text-[10px] font-bold text-secondary uppercase tracking-wide">
+          <th className="py-3 px-4">Name</th><th className="py-3 px-4">Body (preview)</th><th className="py-3 px-4 w-20">Actions</th>
+        </tr></thead>
+        <tbody>
+          {templates.map((t) => (
+            <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition">
+              <td className="py-3 px-4 font-bold text-primaryText">{t.name}</td>
+              <td className="py-3 px-4 text-secondary truncate max-w-[200px]">{t.body}</td>
+              <td className="py-3 px-4"><button onClick={() => onDelete(t.id)} className="p-2 rounded-xl hover:bg-red-50 text-secondary hover:text-red-500 transition"><Trash2 size={14} /></button></td>
+            </tr>
+          ))}
+          {templates.length === 0 && <tr><td colSpan={3} className="py-8 text-center text-secondary">No PDF templates yet.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
 const DocumentsSection: React.FC<{ documents: DocRecord[] }> = ({ documents }) => (
   <div className="bg-white border border-gray-100 rounded-[32px] p-6 space-y-4">
     <div className="flex items-center gap-2">
@@ -2148,6 +2708,27 @@ const AddFaxTemplateForm: React.FC<{ onCancel: () => void; onSave: (t: FaxTempla
   );
 };
 
+const AddPdfTemplateForm: React.FC<{ onCancel: () => void; onSave: (t: { id: string; name: string; body: string }) => void }> = ({ onCancel, onSave }) => {
+  const [name, setName] = useState("");
+  const [body, setBody] = useState("");
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template Name</p>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full" placeholder="Insurance Verification Report" />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">PDF Body / Content</p>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full h-32" placeholder="PDF template content or markup..." />
+      </div>
+      <div className="flex gap-2 pt-2">
+        <button onClick={onCancel} className="flex-1 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold transition">Cancel</button>
+        <button onClick={() => { if (!name.trim()) return; onSave({ id: uid(), name, body }); }} className="flex-1 px-4 py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 transition">Save</button>
+      </div>
+    </div>
+  );
+};
+
 /** -----------------------------
  *  Builder Canvas Section
  *  ----------------------------- */
@@ -2159,13 +2740,15 @@ const BuilderCanvasSection: React.FC<{
   dispositions: Disposition[];
   emailTemplates: EmailTemplate[];
   faxTemplates: FaxTemplate[];
-}> = ({ workflow, published, onDraftChange, onPublish, dispositions, emailTemplates, faxTemplates }) => {
+  pdfTemplates: { id: string; name: string; body: string }[];
+}> = ({ workflow, published, onDraftChange, onPublish, dispositions, emailTemplates, faxTemplates, pdfTemplates }) => {
   const rf = useRef<ReactFlowInstance | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const downloadPdf = async () => {
     const el = canvasRef.current;
@@ -2237,6 +2820,24 @@ const BuilderCanvasSection: React.FC<{
   const [nodes, setNodes, onNodesChange] = useNodesState(initialFlowNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlowEdges);
 
+  const [saveFlash, setSaveFlash] = useState<string | null>(null);
+
+  // IMPORTANT: when switching between workflows, reset the canvas state
+  useEffect(() => {
+    if (!workflow) return;
+    const nextNodes = toFlowNodes(workflow.draft);
+    const nextEdges = toFlowEdges(workflow.draft);
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+
+    // frame the diagram nicely (Visio-like "fit to page")
+    window.requestAnimationFrame(() => {
+      rf.current?.fitView({ padding: 0.22, duration: 250 });
+    });
+  }, [workflow.id, setEdges, setNodes]);
+
   const syncDraft = useCallback(
     (n: Node[], e: Edge[]) => {
       const nextDef = fromFlow(n, e, def);
@@ -2245,26 +2846,68 @@ const BuilderCanvasSection: React.FC<{
     [def, onDraftChange]
   );
 
+  const saveNow = useCallback(() => {
+    // ensures positions/edges are synced into draft model
+    syncDraft(nodes, edges);
+    setSaveFlash("Saved");
+    window.setTimeout(() => setSaveFlash(null), 1200);
+  }, [nodes, edges, syncDraft]);
+
+  const autoLayout = useCallback(
+    (direction: "LR" | "TB" = "LR") => {
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges, direction);
+      setNodes(layoutedNodes);
+      setEdges(layoutedEdges);
+      syncDraft(layoutedNodes, layoutedEdges);
+
+      window.requestAnimationFrame(() => {
+        rf.current?.fitView({ padding: 0.22, duration: 350 });
+      });
+    },
+    [edges, nodes, setEdges, setNodes, syncDraft]
+  );
+
   const onConnect = useCallback(
     (params: Connection) => {
       const newId = uid();
-      const newEdge: Edge = {
+
+      const srcNode = def.nodes.find((n) => n.id === params.source);
+      let resultLabel: string | undefined = undefined;
+
+      // If connection started from a result-specific handle
+      if (params.sourceHandle?.startsWith("result:") && srcNode?.results?.length) {
+        const idx = Number(params.sourceHandle.split(":")[1]);
+        resultLabel = srcNode.results[idx];
+      }
+
+      const hubEdge: HubEdge = {
         id: newId,
         source: params.source || "",
         target: params.target || "",
-        type: "hubEdge",
-        data: { label: "Next", priority: 999, isElse: true },
+        label: "Next",
+        priority: 999,
+        conditionGroup: null,
+        resultLabel,
       };
 
-      const hubEdge: HubEdge = { id: newId, source: params.source || "", target: params.target || "", label: "Next", priority: 999, conditionGroup: null };
+      const newEdge: Edge = {
+        id: newId,
+        source: hubEdge.source,
+        target: hubEdge.target,
+        type: "hubEdge",
+        markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#94A3B8" },
+        data: {
+          label: hubEdge.label,
+          priority: hubEdge.priority,
+          isElse: true,
+          resultLabel: hubEdge.resultLabel,
+        },
+      };
 
-      const nextEdges = addEdge(newEdge, edges);
-      setEdges(nextEdges);
-
-      const nextDef: WorkflowDefinition = { nodes: def.nodes.map((x) => x), edges: [hubEdge, ...def.edges] };
-      onDraftChange(nextDef);
+      setEdges((prev) => addEdge(newEdge, prev));
+      onDraftChange({ ...def, edges: [...def.edges, hubEdge] });
     },
-    [def, edges, onDraftChange, setEdges]
+    [def, onDraftChange, setEdges]
   );
 
   const selectedNode = useMemo(() => def.nodes.find((n) => n.id === selectedNodeId) || null, [def.nodes, selectedNodeId]);
@@ -2384,48 +3027,149 @@ const BuilderCanvasSection: React.FC<{
 
   const addActionToNode = (nodeId: string, type: ActionType) => {
     const defaults: Record<ActionType, () => WorkflowAction> = {
-      SET_STATUS: () => ({ id: uid(), type: "SET_STATUS", payload: { dispositionId: "" } }),
-      AUTOFILL_FIELDS: () => ({ id: uid(), type: "AUTOFILL_FIELDS", payload: { fields: [{ key: "copay", op: "IS" as const, value: "" }] } }),
-      ASSIGN_USER: () => ({ id: uid(), type: "ASSIGN_USER", payload: { mode: "ROLE", value: "" } }),
-      SEND_EMAIL: () => ({ id: uid(), type: "SEND_EMAIL", payload: { templateId: "", to: "qa" } }),
-      SEND_FAX: () => ({ id: uid(), type: "SEND_FAX", payload: { templateId: "", to: "" } }),
-      EXPIRE: () => ({ id: uid(), type: "EXPIRE", payload: { days: 30 } }),
-      REQUEUE: () => ({ id: uid(), type: "REQUEUE", payload: { delayHours: 1, delayMinutes: 0, hiddenFromQueue: false } }),
-      API_CALL: () => ({ id: uid(), type: "API_CALL", payload: { method: "GET", url: "", headers: "", body: "" } }),
-      GENERATE_PDF: () => ({ id: uid(), type: "GENERATE_PDF", payload: { templateName: "", saveToDocuments: true } }),
-      REQUEUE_LIMIT_CHECK: () => ({ id: uid(), type: "REQUEUE_LIMIT_CHECK", payload: { maxCount: 3, routeToResult: "" } }),
+      SET_STATUS: () => ({
+        id: uid(),
+        type: "SET_STATUS",
+        payload: { dispositionId: "" },
+        ifGroup: null,
+      }),
+      AUTOFILL_FIELDS: () => ({
+        id: uid(),
+        type: "AUTOFILL_FIELDS",
+        payload: { fields: [{ key: "copay", op: "IS" as const, value: "" }] },
+        ifGroup: null,
+      }),
+      ASSIGN_USER: () => ({
+        id: uid(),
+        type: "ASSIGN_USER",
+        payload: { mode: "ROLE", value: "" },
+        ifGroup: null,
+      }),
+      SEND_EMAIL: () => ({
+        id: uid(),
+        type: "SEND_EMAIL",
+        payload: { templateId: "", to: "qa" },
+        ifGroup: null,
+      }),
+      SEND_FAX: () => ({
+        id: uid(),
+        type: "SEND_FAX",
+        payload: { templateId: "", to: "" },
+        ifGroup: null,
+      }),
+      EXPIRE: () => ({
+        id: uid(),
+        type: "EXPIRE",
+        payload: { days: 30 },
+        ifGroup: null,
+      }),
+      REQUEUE: () => ({
+        id: uid(),
+        type: "REQUEUE",
+        payload: { delayHours: 1, delayMinutes: 0, hiddenFromQueue: false },
+        ifGroup: null,
+      }),
+      API_CALL: () => ({
+        id: uid(),
+        type: "API_CALL",
+        payload: { method: "GET", url: "", headers: "", body: "" },
+        ifGroup: null,
+      }),
+      GENERATE_PDF: () => ({
+        id: uid(),
+        type: "GENERATE_PDF",
+        payload: { templateName: "", saveToDocuments: true },
+        ifGroup: null,
+      }),
+      REQUEUE_LIMIT_CHECK: () => ({
+        id: uid(),
+        type: "REQUEUE_LIMIT_CHECK",
+        payload: { maxCount: 3, routeToResult: "" },
+        ifGroup: null,
+      }),
+      AUTO_CREATE_EV_ACCOUNT: () => ({
+        id: uid(),
+        type: "AUTO_CREATE_EV_ACCOUNT",
+        payload: {},
+        ifGroup: null,
+      }),
+      AUTO_CREATE_PA_ACCOUNT: () => ({
+        id: uid(),
+        type: "AUTO_CREATE_PA_ACCOUNT",
+        payload: {},
+        ifGroup: null,
+      }),
     };
+
     const action = defaults[type]();
 
-    onDraftChange({ ...def, nodes: def.nodes.map((n) => (n.id === nodeId ? { ...n, actions: [action, ...n.actions] } : n)) });
-    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data as any), actions: [action, ...((n.data as any)?.actions || [])] } } : n)));
+    onDraftChange({
+      ...def,
+      nodes: def.nodes.map((n) =>
+        n.id === nodeId ? { ...n, actions: [action, ...n.actions] } : n
+      ),
+    });
+
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...(n.data as any),
+                actions: [action, ...(((n.data as any)?.actions || []) as any[])],
+              },
+            }
+          : n
+      )
+    );
   };
 
   const removeActionFromNode = (nodeId: string, actionId: string) => {
-    onDraftChange({ ...def, nodes: def.nodes.map((n) => (n.id === nodeId ? { ...n, actions: n.actions.filter((a) => a.id !== actionId) } : n)) });
+    const node = def.nodes.find((n) => n.id === nodeId);
+    const nextActions = (node?.actions || []).filter((a) => a.id !== actionId);
+
+    const nextNodes = def.nodes.map((n) => (n.id === nodeId ? { ...n, actions: nextActions } : n));
+    onDraftChange({ ...def, nodes: nextNodes });
+
+    setNodes((prev) =>
+      prev.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data as any), actions: nextActions } } : n))
+    );
   };
 
   const updateAction = (nodeId: string, action: WorkflowAction) => {
-    onDraftChange({ ...def, nodes: def.nodes.map((n) => (n.id === nodeId ? { ...n, actions: n.actions.map((a) => (a.id === action.id ? action : a)) } : n)) });
+    const node = def.nodes.find((n) => n.id === nodeId);
+    const nextActions = (node?.actions || []).map((a) => (a.id === action.id ? action : a));
+
+    const nextNodes = def.nodes.map((n) => (n.id === nodeId ? { ...n, actions: nextActions } : n));
+    onDraftChange({ ...def, nodes: nextNodes });
+
+    setNodes((prev) =>
+      prev.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data as any), actions: nextActions } } : n))
+    );
   };
 
   const updateEdgeMeta = (edgeId: string, patch: Partial<HubEdge>) => {
     onDraftChange({ ...def, edges: def.edges.map((e) => (e.id === edgeId ? { ...e, ...patch } : e)) });
 
     setEdges((prev) =>
-      prev.map((e) =>
-        e.id === edgeId
-          ? {
-            ...e,
-            data: {
-              ...(e.data as any),
-              label: patch.label ?? (e.data as any)?.label,
-              priority: patch.priority ?? (e.data as any)?.priority,
-              isElse: patch.conditionGroup ? (patch.conditionGroup.items?.length ?? 0) === 0 : patch.conditionGroup === null,
-            },
-          }
-          : e
-      )
+      prev.map((e) => {
+        if (e.id !== edgeId) return e;
+
+        const prevData: any = e.data || {};
+        const nextData: any = { ...prevData };
+
+        if (patch.label !== undefined) nextData.label = patch.label;
+        if (patch.priority !== undefined) nextData.priority = patch.priority;
+        if (patch.resultLabel !== undefined) nextData.resultLabel = patch.resultLabel ?? "";
+
+        // Only recompute isElse when conditionGroup is explicitly updated (including null)
+        if (patch.conditionGroup !== undefined) {
+          nextData.isElse = !patch.conditionGroup || (patch.conditionGroup.items?.length ?? 0) === 0;
+        }
+
+        return { ...e, data: nextData };
+      })
     );
   };
 
@@ -2528,6 +3272,22 @@ const BuilderCanvasSection: React.FC<{
 
         <div className="flex-1" />
 
+        <button
+          onClick={() => autoLayout("LR")}
+          title="Auto arrange blocks (Visio-style)"
+          className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-1.5 text-xs"
+        >
+          <Layers size={14} /> Auto Layout
+        </button>
+
+        <button
+          onClick={() => rf.current?.fitView({ padding: 0.22, duration: 350 })}
+          title="Fit diagram to screen"
+          className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition inline-flex items-center gap-1.5 text-xs"
+        >
+          <RefreshCcw size={14} /> Fit
+        </button>
+
         <button onClick={() => setPropertiesOpen((p) => !p)}
           className={`px-3 py-2 rounded-xl font-bold inline-flex items-center gap-1.5 transition text-xs ${propertiesOpen ? "bg-primary text-white shadow-sm shadow-primary/20" : "bg-white border border-gray-200 text-secondary hover:bg-gray-100"}`}>
           <Settings2 size={14} /> Properties
@@ -2554,11 +3314,27 @@ const BuilderCanvasSection: React.FC<{
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onConnectStart={() => setIsConnecting(true)}
+            onConnectEnd={() => setIsConnecting(false)}
+            nodesDraggable={!isConnecting}
+            nodeDragThreshold={8}
+            snapToGrid
+            snapGrid={[24, 24]}
+            connectionLineType={ConnectionLineType.SmoothStep}
+            panOnScroll
+            selectionOnDrag
+            fitViewOptions={{ padding: 0.22 }}
+            connectOnClick
             onSelectionChange={onSelectionChange}
+            onNodeDoubleClick={(_, node) => {
+              setSelectedNodeId(node.id);
+              setSelectedEdgeId(null);
+              setPropertiesOpen(true);
+            }}
             onNodeDragStop={onNodeDragStop}
             fitView
           >
-            <Background gap={18} />
+            <Background gap={24} />
             <MiniMap pannable zoomable />
             <Controls />
           </ReactFlow>
@@ -2573,8 +3349,28 @@ const BuilderCanvasSection: React.FC<{
             <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10">
               <div className="flex items-center gap-2 text-xs font-bold text-secondary uppercase tracking-wide">
                 <Settings2 size={16} /> Properties
+                {saveFlash && (
+                  <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-full bg-green-50 border border-green-200 text-green-700">
+                    {saveFlash}
+                  </span>
+                )}
               </div>
-              <button onClick={() => setPropertiesOpen(false)} className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs">✕ Close</button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={saveNow}
+                  className="px-3 py-2 rounded-xl bg-primary text-white font-bold hover:opacity-95 transition text-xs inline-flex items-center gap-2 shadow-sm shadow-primary/20"
+                  title="Save draft"
+                >
+                  <Save size={14} /> Save
+                </button>
+                <button
+                  onClick={() => setPropertiesOpen(false)}
+                  className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
+                >
+                  ✕ Close
+                </button>
+              </div>
             </div>
 
             <div className="p-5 space-y-5">
@@ -2711,17 +3507,19 @@ const BuilderCanvasSection: React.FC<{
                             <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-2">Actions</p>
                             <div className="flex flex-wrap gap-1 mb-3">
                               {([
-                                ["SET_STATUS", "Disposition"],
-                                ["AUTOFILL_FIELDS", "Autofill"],
-                                ["ASSIGN_USER", "Assign"],
-                                ["SEND_EMAIL", "Email"],
-                                ["SEND_FAX", "Fax"],
-                                ["EXPIRE", "Expire"],
-                                ["REQUEUE", "Requeue"],
-                                ["API_CALL", "API Call"],
-                                ["GENERATE_PDF", "Gen PDF"],
-                                ["REQUEUE_LIMIT_CHECK", "Requeue Limit"],
-                              ] as [ActionType, string][]).map(([type, label]) => (
+                                  ["SET_STATUS", "Disposition"],
+                                  ["AUTOFILL_FIELDS", "Autofill"],
+                                  ["ASSIGN_USER", "Assign"],
+                                  ["SEND_EMAIL", "Email"],
+                                  ["SEND_FAX", "Fax"],
+                                  ["EXPIRE", "Expire"],
+                                  ["REQUEUE", "Requeue"],
+                                  ["API_CALL", "API Call"],
+                                  ["GENERATE_PDF", "Gen PDF"],
+                                  ["REQUEUE_LIMIT_CHECK", "Requeue Limit"],
+                                  ["AUTO_CREATE_EV_ACCOUNT", "Auto EV"],
+                                  ["AUTO_CREATE_PA_ACCOUNT", "Auto PA"],
+                                ] as [ActionType, string][]).map(([type, label]) => (
                                 <button key={type} onClick={() => addActionToNode(selectedNode.id, type)} className="px-2 py-1.5 rounded-xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]">
                                   + {label}
                                 </button>
@@ -2755,6 +3553,44 @@ const BuilderCanvasSection: React.FC<{
                                             <option key={d.id} value={d.id}>{d.name} ({d.queue})</option>
                                           ))}
                                         </select>
+                                        {/* ── ACTION-LEVEL IF/THEN CONDITIONS ── */}
+                                          <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2773,6 +3609,43 @@ const BuilderCanvasSection: React.FC<{
                                               <option value="EXISTS">EXISTS</option>
                                             </select>
                                             <input value={f.value} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], value: e.target.value }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none" placeholder="value" disabled={f.op === "EXISTS"} />
+                                                                                      <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                           </div>
                                         ))}
                                         <div className="flex gap-1">
@@ -2800,6 +3673,43 @@ const BuilderCanvasSection: React.FC<{
                                             {(a.payload.mode === "ROLE" ? ROLE_OPTIONS : a.payload.mode === "DEPARTMENT" ? DEPARTMENT_OPTIONS : PERSON_OPTIONS).map((o) => <option key={o} value={o}>{o}</option>)}
                                           </select>
                                         </div>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2821,6 +3731,43 @@ const BuilderCanvasSection: React.FC<{
                                             {emailTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                                           </select>
                                         </div>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2838,6 +3785,43 @@ const BuilderCanvasSection: React.FC<{
                                           <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">To (Fax Number)</p>
                                           <input value={a.payload.to} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, to: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" placeholder="555-123-4567" />
                                         </div>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2847,6 +3831,43 @@ const BuilderCanvasSection: React.FC<{
                                         <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Expire After (Days)</p>
                                         <input type="number" min={1} value={a.payload.days} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { days: Number(e.target.value) || 1 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
                                         <p className="text-[10px] text-secondary mt-1">Items in EV/PA queues expire after this many days.</p>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2867,6 +3888,43 @@ const BuilderCanvasSection: React.FC<{
                                           <input type="checkbox" checked={a.payload.hiddenFromQueue} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, hiddenFromQueue: e.target.checked } })} className="rounded" />
                                           Hidden from queue (visible to managers only)
                                         </label>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2896,6 +3954,43 @@ const BuilderCanvasSection: React.FC<{
                                           <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Body (JSON)</p>
                                           <textarea value={a.payload.body} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, body: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs outline-none w-full h-16 font-mono" placeholder='{"key": "value"}' />
                                         </div>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
 
@@ -2903,11 +3998,54 @@ const BuilderCanvasSection: React.FC<{
                                     {a.type === "GENERATE_PDF" && (
                                       <div className="space-y-2">
                                         <div>
-                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template Name</p>
-                                          <input value={a.payload.templateName} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateName: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" placeholder="EV Summary Report" />
+                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">PDF Template</p>
+
+                                          {pdfTemplates.length > 0 ? (
+                                            <select
+                                              value={a.payload.templateName}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateName: e.target.value } })
+                                              }
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                            >
+                                              <option value="">— Select Template —</option>
+                                              {pdfTemplates.map((t) => (
+                                                <option key={t.id} value={t.name}>
+                                                  {t.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          ) : (
+                                            <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                              No PDF templates yet. Add one in the <span className="font-bold text-primaryText">PDF Templates</span> tab.
+                                            </div>
+                                          )}
                                         </div>
+
+                                        {/* Allow custom name if needed */}
+                                        {(!pdfTemplates.length || !pdfTemplates.some((t) => t.name === a.payload.templateName)) && (
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Template Name (custom)</p>
+                                            <input
+                                              value={a.payload.templateName}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, { ...a, payload: { ...a.payload, templateName: e.target.value } })
+                                              }
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                              placeholder="EV Summary Report"
+                                            />
+                                          </div>
+                                        )}
+
                                         <label className="flex items-center gap-2 text-xs text-primaryText cursor-pointer">
-                                          <input type="checkbox" checked={a.payload.saveToDocuments} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, saveToDocuments: e.target.checked } })} className="rounded" />
+                                          <input
+                                            type="checkbox"
+                                            checked={a.payload.saveToDocuments}
+                                            onChange={(e) =>
+                                              updateAction(selectedNode.id, { ...a, payload: { ...a.payload, saveToDocuments: e.target.checked } })
+                                            }
+                                            className="rounded"
+                                          />
                                           Save to Documents
                                         </label>
                                       </div>
@@ -2927,10 +4065,91 @@ const BuilderCanvasSection: React.FC<{
                                             {(selectedNode.results || []).map((r: string) => <option key={r} value={r}>{r}</option>)}
                                           </select>
                                         </div>
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
+                                      </div>
+                                    )}
+
+                                    {(a.type === "AUTO_CREATE_EV_ACCOUNT" || a.type === "AUTO_CREATE_PA_ACCOUNT") && (
+                                      <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                        No configuration required. This action will trigger the backend automation for {a.type === "AUTO_CREATE_EV_ACCOUNT" ? "EV" : "PA"}.
+                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                                IF / THEN (Action Conditions)
+                                              </p>
+
+                                              {a.ifGroup ? (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                  title="Remove conditions (always run)"
+                                                >
+                                                  Remove
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                  title="Add conditions (run only if matched)"
+                                                >
+                                                  + Add IF
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {!a.ifGroup ? (
+                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                                No conditions — this action will always run.
+                                              </div>
+                                            ) : (
+                                              <ConditionGroupEditor
+                                                title="Run this action only if…"
+                                                group={a.ifGroup}
+                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                              />
+                                            )}
+                                          </div>
                                       </div>
                                     )}
                                   </div>
                                 ))}
+                                
                               </div>
                             )}
                           </div>
@@ -3336,9 +4555,10 @@ const DispositionsSection: React.FC<{
   searchValue: string;
   onSearchChange: (v: string) => void;
   onAdd: () => void;
+  onEdit: (id: string) => void;
   onToggleEnabled: (id: string) => void;
   onRowClick: (id: string) => void;
-}> = ({ dispositions, queueOptions, queueValue, onQueueChange, searchValue, onSearchChange, onAdd, onToggleEnabled, onRowClick }) => {
+}> = ({ dispositions, queueOptions, queueValue, onQueueChange, searchValue, onSearchChange, onAdd, onEdit, onToggleEnabled, onRowClick }) => {
   return (
     <div className="bg-white border border-gray-100 rounded-[32px] p-8 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
@@ -3394,7 +4614,19 @@ const DispositionsSection: React.FC<{
                 <div className="col-span-3 text-sm text-secondary font-medium">{d.queue}</div>
                 <div className="col-span-2 text-sm text-secondary font-medium">{d.outcomeTag || "—"}</div>
 
-                <div className="col-span-2 flex justify-end">
+                <div className="col-span-2 flex justify-end gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(d.id);
+                    }}
+                    className="px-3 py-2 rounded-2xl bg-white border border-gray-100 text-primaryText font-bold hover:bg-gray-50 transition text-xs inline-flex items-center gap-2"
+                    title="Edit disposition"
+                  >
+                    <Pencil size={14} />
+                    Edit
+                  </button>
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -3426,30 +4658,113 @@ const DispositionsSection: React.FC<{
 /** -----------------------------
  *  Add Disposition Modal Form
  *  ----------------------------- */
-const AddDispositionForm: React.FC<{
+const DispositionForm: React.FC<{
+  mode: "add" | "edit";
   selectedQueueName: string;
+  initialDisposition?: Disposition | null;
   onCancel: () => void;
   onSave: (payload: Omit<Disposition, "id" | "code">) => void;
-}> = ({ selectedQueueName, onCancel, onSave }) => {
-  const [name, setName] = useState("");
-  const [enabled, setEnabled] = useState(true);
-  const [outcomeTag, setOutcomeTag] = useState("—");
-  const [resultLabels, setResultLabels] = useState<string[]>([]);
+}> = ({ mode, selectedQueueName, initialDisposition = null, onCancel, onSave }) => {
+  const [name, setName] = useState(initialDisposition?.name ?? "");
+  const [enabled, setEnabled] = useState(initialDisposition?.enabled ?? true);
+  const [outcomeTag, setOutcomeTag] = useState(initialDisposition?.outcomeTag ?? "—");
+  const [results, setResults] = useState<ResultMapping[]>(
+    () => (initialDisposition?.results?.length ? initialDisposition.results.map((r) => ({ ...r })) : [])
+  );
   const [newResultName, setNewResultName] = useState("");
+
+  // If user opens edit for another disposition without full remount
+  useEffect(() => {
+    if (mode === "edit" && initialDisposition) {
+      setName(initialDisposition.name ?? "");
+      setEnabled(!!initialDisposition.enabled);
+      setOutcomeTag(initialDisposition.outcomeTag ?? "—");
+      setResults(initialDisposition.results?.map((r) => ({ ...r })) ?? []);
+      setNewResultName("");
+    }
+  }, [mode, initialDisposition?.id]);
 
   const outcomeTagOptions = ["—", "Missing/Invalid Info", "Data Entry", "Pending", "Auditing", "EV Uploaded To EHR", "Submitted"];
   const canSave = name.trim().length >= 3;
 
   const addResult = () => {
     const trimmed = newResultName.trim();
-    if (trimmed && !resultLabels.includes(trimmed)) {
-      setResultLabels((prev) => [...prev, trimmed]);
-      setNewResultName("");
-    }
+    if (!trimmed) return;
+
+    const exists = results.some((r) => r.label.trim().toLowerCase() === trimmed.toLowerCase());
+    if (exists) return;
+
+    setResults((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        label: trimmed,
+        status: "active",
+        nextType: "none",
+        nextDispositionId: "",
+      },
+    ]);
+    setNewResultName("");
   };
 
   const removeResult = (idx: number) => {
-    setResultLabels((prev) => prev.filter((_, i) => i !== idx));
+    setResults((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const updateResultLabel = (idx: number, label: string) => {
+    setResults((prev) => prev.map((r, i) => (i === idx ? { ...r, label } : r)));
+  };
+
+  const updateResultStatus = (idx: number, status: "active" | "disabled") => {
+    setResults((prev) => prev.map((r, i) => (i === idx ? { ...r, status } : r)));
+  };
+
+  // Drag ordering (handle-based)
+  const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const moveResult = (from: number, to: number) => {
+    setResults((prev) => {
+      if (from === to) return prev;
+      if (from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const onHandleDragStart =
+    (index: number) => (e: React.DragEvent<HTMLDivElement>) => {
+      setDragFromIndex(index);
+      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", String(index));
+      } catch {}
+    };
+
+  const onRowDragOver =
+    (index: number) => (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setDragOverIndex(index);
+      e.dataTransfer.dropEffect = "move";
+    };
+
+  const onRowDrop =
+    (toIndex: number) => (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const from = dragFromIndex ?? Number(e.dataTransfer.getData("text/plain"));
+      if (Number.isFinite(from) && from !== toIndex) {
+        moveResult(from, toIndex);
+      }
+      setDragFromIndex(null);
+      setDragOverIndex(null);
+    };
+
+  const onRowDragEnd = () => {
+    setDragFromIndex(null);
+    setDragOverIndex(null);
   };
 
   return (
@@ -3463,7 +4778,11 @@ const AddDispositionForm: React.FC<{
 
         <div className="lg:col-span-2 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
           <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Status</p>
-          <select value={enabled ? "active" : "inactive"} onChange={(e) => setEnabled(e.target.value === "active")} className="bg-transparent outline-none w-full text-sm text-primaryText">
+          <select
+            value={enabled ? "active" : "inactive"}
+            onChange={(e) => setEnabled(e.target.value === "active")}
+            className="bg-transparent outline-none w-full text-sm text-primaryText"
+          >
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
@@ -3471,12 +4790,21 @@ const AddDispositionForm: React.FC<{
 
         <div className="lg:col-span-2 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
           <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Disposition Name</p>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="bg-transparent outline-none w-full text-sm text-primaryText placeholder:text-secondary" placeholder="e.g., Added to PI Worksheet" />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="bg-transparent outline-none w-full text-sm text-primaryText placeholder:text-secondary"
+            placeholder="e.g., Added to PI Worksheet"
+          />
         </div>
 
         <div className="lg:col-span-2 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-4">
           <p className="text-xs font-bold text-secondary uppercase tracking-wide mb-2">Outcome Tag</p>
-          <select value={outcomeTag} onChange={(e) => setOutcomeTag(e.target.value)} className="bg-transparent outline-none w-full text-sm text-primaryText">
+          <select
+            value={outcomeTag}
+            onChange={(e) => setOutcomeTag(e.target.value)}
+            className="bg-transparent outline-none w-full text-sm text-primaryText"
+          >
             {outcomeTagOptions.map((t) => (
               <option key={t} value={t}>
                 {t}
@@ -3488,11 +4816,11 @@ const AddDispositionForm: React.FC<{
 
       {/* Results (Outcomes) Section */}
       <div className="border border-gray-100 rounded-2xl p-4 space-y-3 bg-white">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-secondary uppercase tracking-wide">Results (Outcomes)</p>
-            <p className="text-[11px] text-secondary mt-0.5">Add the possible results/outcomes for this disposition.</p>
-          </div>
+        <div>
+          <p className="text-xs font-bold text-secondary uppercase tracking-wide">Results (Outcomes)</p>
+          <p className="text-[11px] text-secondary mt-0.5">
+            Add, edit, and reorder the possible results/outcomes for this disposition.
+          </p>
         </div>
 
         {/* Add result input */}
@@ -3500,38 +4828,87 @@ const AddDispositionForm: React.FC<{
           <input
             value={newResultName}
             onChange={(e) => setNewResultName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addResult(); } }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addResult();
+              }
+            }}
             className="flex-1 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none placeholder:text-secondary"
             placeholder="e.g., Approved, Denied, Pending Review"
           />
           <button
+            type="button"
             onClick={addResult}
             disabled={!newResultName.trim()}
-            className={`px-3 py-2 rounded-xl font-bold text-xs inline-flex items-center gap-1.5 transition ${newResultName.trim()
-              ? "bg-primary text-white shadow-sm shadow-primary/20 hover:opacity-95"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
+            className={`px-3 py-2 rounded-xl font-bold text-xs inline-flex items-center gap-1.5 transition ${
+              newResultName.trim()
+                ? "bg-primary text-white shadow-sm shadow-primary/20 hover:opacity-95"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed"
+            }`}
           >
             <Plus size={14} /> Add Result
           </button>
         </div>
 
-        {/* Result rows */}
-        {resultLabels.length === 0 ? (
+        {/* Result rows (editable + reorderable) */}
+        {results.length === 0 ? (
           <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50 text-center">
             No results added yet. Click "+ Add Result" above.
           </div>
         ) : (
-          <div className="space-y-2">
-            {resultLabels.map((r, idx) => (
-              <div key={idx} className="flex items-center justify-between gap-3 border border-gray-100 rounded-xl px-4 py-3 bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <BadgeCheck size={16} className="text-primary" />
-                  <span className="text-sm font-bold text-primaryText">{r}</span>
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {results.map((r, idx) => (
+              <div
+                key={r.id}
+                onDragOver={onRowDragOver(idx)}
+                onDrop={onRowDrop(idx)}
+                onDragLeave={() => setDragOverIndex((prev) => (prev === idx ? null : prev))}
+                className={`flex items-center gap-3 border border-gray-100 rounded-xl px-3 py-3 bg-gray-50 ${
+                  dragOverIndex === idx ? "ring-2 ring-primary/30" : ""
+                }`}
+                title="Drag handle to reorder"
+              >
+                {/* Drag handle */}
+                <div
+                  draggable
+                  onDragStart={onHandleDragStart(idx)}
+                  onDragEnd={onRowDragEnd}
+                  className="p-2 rounded-lg hover:bg-gray-200 transition cursor-grab active:cursor-grabbing text-secondary"
+                  title="Drag to reorder"
+                >
+                  <GripVertical size={16} />
                 </div>
+
+                {/* Editable label */}
+                <div className="flex-1">
+                  <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Result</p>
+                  <input
+                    value={r.label}
+                    onChange={(e) => updateResultLabel(idx, e.target.value)}
+                    className="w-full bg-white border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none"
+                    placeholder="Result label"
+                  />
+                </div>
+
+                {/* Status */}
+                <div className="w-[140px]">
+                  <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Status</p>
+                  <select
+                    value={r.status}
+                    onChange={(e) => updateResultStatus(idx, e.target.value as "active" | "disabled")}
+                    className="w-full bg-white border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none"
+                  >
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </div>
+
+                {/* Remove */}
                 <button
+                  type="button"
                   onClick={() => removeResult(idx)}
-                  className="p-1.5 rounded-lg hover:bg-gray-200 transition text-secondary"
+                  className="p-2 rounded-lg hover:bg-gray-200 transition text-secondary"
                   title="Remove result"
                 >
                   <Trash2 size={14} />
@@ -3543,10 +4920,16 @@ const AddDispositionForm: React.FC<{
       </div>
 
       <div className="flex justify-end gap-3">
-        <button onClick={onCancel} className="px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition"
+        >
           Cancel
         </button>
+
         <button
+          type="button"
           disabled={!canSave}
           onClick={() =>
             onSave({
@@ -3554,20 +4937,20 @@ const AddDispositionForm: React.FC<{
               queue: selectedQueueName,
               enabled,
               outcomeTag: outcomeTag.trim() || "—",
-              results: resultLabels.map((label) => ({
-                id: uid(),
-                label,
-                status: "active" as const,
-                nextType: "none" as const,
-                nextDispositionId: "",
+              results: results.map((r) => ({
+                ...r,
+                label: r.label.trim(),
               })),
             })
           }
-          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${canSave ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95" : "bg-gray-200 text-gray-400 cursor-not-allowed"
-            }`}
+          className={`px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition ${
+            canSave
+              ? "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-95"
+              : "bg-gray-200 text-gray-400 cursor-not-allowed"
+          }`}
         >
           <Save size={18} />
-          Save Disposition
+          {mode === "edit" ? "Update Disposition" : "Save Disposition"}
         </button>
       </div>
     </div>
