@@ -1,6 +1,5 @@
 // MySubmissionsView.tsx 2026
 
-
 import React, { useState, useMemo } from 'react';
 import { 
   Search, 

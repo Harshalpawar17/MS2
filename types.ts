@@ -1,3 +1,4 @@
+import ClinicIntakeConfigView from "./views/ClinicIntakeConfig";
 
 export enum UserRole {
   CLINIC_STAFF = 'Clinic Staff',

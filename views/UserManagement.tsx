@@ -47,7 +47,7 @@ const MOCK_CLINICS: Clinic[] = Array.from({ length: 10 }, (_, i) => ({
   npi: `12345678${i.toString().padStart(2, '0')}`,
   taxId: `98-76543${i.toString().padStart(2, '0')}`,
   medicarePtan: '',
-  medicaidId: "",   // Added medicaidId as a required field with default empty value
+  medicaidId: "",   
   insuranceCredentials: [],
   systemAccess: [],
   providers: []

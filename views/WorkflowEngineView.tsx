@@ -1307,9 +1307,6 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
     () => [
       { key: "Queues" as const, label: "Queues", icon: <Layers size={18} />, desc: "Select a queue first (then Dispositions are filtered by that queue)" },
       { key: "Dispositions" as const, label: "Dispositions", icon: <Layers size={18} />, desc: "Queue → Dispositions (row click opens disposition workflow builder)" },
-      // { key: "workflows" as const, label: "Workflows", icon: <WorkflowIcon size={18} />, desc: "Create and manage workflows per account type" },
-      // { key: "triggers" as const, label: "Triggers", icon: <Zap size={18} />, desc: "HubSpot-style enrollment rules (when records enter workflow)" },
-      // { key: "builder" as const, label: "Builder", icon: <GitBranch size={18} />, desc: "Visual canvas: drag nodes, connect arrows, IF/ELSE branches" },
       { key: "emailTemplates" as const, label: "Email Templates", icon: <FileDown size={18} />, desc: "Manage email templates used in workflow actions" },
       { key: "faxTemplates" as const, label: "Fax Templates", icon: <FileDown size={18} />, desc: "Manage fax templates used in workflow actions" },
       { key: "documents" as const, label: "Documents", icon: <ClipboardList size={18} />, desc: "Generated documents and file storage" },
@@ -1519,10 +1516,6 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
         {/* Header */}
         <div className="flex flex-col space-y-2">
           <h1 className="text-3xl font-bold text-primaryText">Workflow Engine</h1>
-          {/* <p className="text-secondary font-medium">
-            HubSpot-style builder: <span className="font-bold text-primaryText">left actions</span> +{" "}
-            <span className="font-bold text-primaryText">visual branches/arrows</span> + triggers + versions + audit.
-          </p> */}
         </div>
 
         {/* Tabs */}

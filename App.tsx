@@ -22,6 +22,7 @@ import RuleEngine from './views/RuleEngine';
 import WorkflowEngineView from './views/WorkflowEngineView';
 import UserManagement from './views/UserManagement';
 import PodManagement from './views/PodManagement';
+import ClinicIntakeConfigView from "./views/ClinicIntakeConfig";
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -42,6 +43,13 @@ const App: React.FC = () => {
     setUser(null);
     localStorage.removeItem('medflow_user');
   };
+
+  const NotFound = () => (
+    <div style={{ padding: 24 }}>
+      <h2 style={{ fontWeight: 800 }}>Page not found</h2>
+      <p>That route does not exist.</p>
+    </div>
+  );
 
   // Check if we are in the "public" patient portal view
   const isPatientPortal = window.location.hash.includes('/public/intake');
@@ -75,6 +83,8 @@ const App: React.FC = () => {
           <Route path="admin/workflow-engine" element={<WorkflowEngineView />} />
           <Route path="admin/users" element={<UserManagement />} />
           <Route path="admin/pods" element={<PodManagement />} />
+          <Route path="admin/ClinicIntakeConfig" element={<ClinicIntakeConfigView />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
         
         <Route path="*" element={<Navigate to="/" replace />} />

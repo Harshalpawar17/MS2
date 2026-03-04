@@ -25,6 +25,74 @@ export const CPT_CODES = [
   { category: 'Office Visit', codes: ['99203', '99204', '99213', '99214'] },
 ];
 
+export const SYSTEM_BENEFIT_CATEGORIES = [
+  'Chiropractic Manipulation',
+  'Office Visit / E&M',
+  'Physical Therapy',
+  'Acupuncture/Dry Needling',
+  'Diagnostic Imaging',
+  'DME/Orthotics & Braces',
+  'Injection/Pain Management',
+  'Biologics/Viscosupplementation'
+];
+
+export const SYSTEM_CPT_MASTER = [
+  { code: '98943', description: 'Extremity Adjustment', category: 'Chiropractic Manipulation' },
+  { code: '98940', description: 'Spinal Adjustment (1-2 regions)', category: 'Chiropractic Manipulation' },
+  { code: '98941', description: 'Spinal Adjustment (3-4 regions)', category: 'Chiropractic Manipulation' },
+  { code: '98942', description: 'Spinal Adjustment (5 regions)', category: 'Chiropractic Manipulation' },
+  
+  { code: '99202', description: 'Initial Evaluation (Level 2)', category: 'Office Visit / E&M' },
+  { code: '99203', description: 'Initial Evaluation (Level 3)', category: 'Office Visit / E&M' },
+  { code: '99204', description: 'Initial Evaluation (Level 4)', category: 'Office Visit / E&M' },
+  { code: '99212', description: 'Established Patient Evaluation (Level 2)', category: 'Office Visit / E&M' },
+  { code: '99213', description: 'Established Patient Evaluation (Level 3)', category: 'Office Visit / E&M' },
+  { code: '99214', description: 'Established Patient Evaluation (Level 4)', category: 'Office Visit / E&M' },
+
+  { code: '96156', description: 'Behavioral Health Assessment', category: 'Physical Therapy' },
+  { code: '97012', description: 'Traction', category: 'Physical Therapy' },
+  { code: '97530', description: 'Therapeutic Activities', category: 'Physical Therapy' },
+  { code: '97112', description: 'Neuromuscular Education', category: 'Physical Therapy' },
+  { code: '97110', description: 'Therapeutic Exercise', category: 'Physical Therapy' },
+  { code: '97014', description: 'Electrical Stimulation (E-Stim)', category: 'Physical Therapy' },
+  { code: '97150', description: 'Group Therapy', category: 'Physical Therapy' },
+  { code: '97140', description: 'Manual Therapy', category: 'Physical Therapy' },
+  { code: '97124', description: 'Massage Performed by DC / Massage Therapist', category: 'Physical Therapy' },
+
+  { code: '20560', description: 'Dry Needling (1-2 muscles)', category: 'Acupuncture/Dry Needling' },
+  { code: '20561', description: 'Dry Needling (3+ muscles)', category: 'Acupuncture/Dry Needling' },
+  { code: '97810', description: 'Acupuncture (Initial 15 min)', category: 'Acupuncture/Dry Needling' },
+  { code: '97811', description: 'Acupuncture (Additional 15 min)', category: 'Acupuncture/Dry Needling' },
+
+  { code: '72040', description: 'X-Ray (Cervical, 2-3 views)', category: 'Diagnostic Imaging' },
+  { code: '72100', description: 'X-Ray (Lumbar, 2-3 views)', category: 'Diagnostic Imaging' },
+
+  { code: 'E0730', description: 'TENS', category: 'DME/Orthotics & Braces' },
+  { code: 'L3020', description: 'Foot, Insert Removable', category: 'DME/Orthotics & Braces' },
+  { code: 'L0456', description: 'TLSO Customized', category: 'DME/Orthotics & Braces' },
+  { code: 'L1832', description: 'Knee Brace', category: 'DME/Orthotics & Braces' },
+  { code: 'L0648', description: 'Orthosis Off The Shelf', category: 'DME/Orthotics & Braces' },
+  { code: 'L0180', description: 'Cervical Collar', category: 'DME/Orthotics & Braces' },
+  { code: 'L1005', description: 'Scoli Brace', category: 'DME/Orthotics & Braces' },
+  { code: 'L3000', description: 'Custom Molded Shoe Orthotic', category: 'DME/Orthotics & Braces' },
+  { code: 'L0457', description: 'TLSO Brace', category: 'DME/Orthotics & Braces' },
+  { code: 'L0650', description: 'Lumbar Sacral Orthosis', category: 'DME/Orthotics & Braces' },
+
+  { code: '20610', description: 'Intraarticular Injection w/out Ultrasound Guidance', category: 'Injection/Pain Management' },
+  { code: '20611', description: 'Intraarticular Injection w Ultrasound Guidance', category: 'Injection/Pain Management' },
+  { code: '20553', description: 'Trigger Point Injections, 3 muscles', category: 'Injection/Pain Management' },
+  { code: '64515', description: 'Nerve block on the stellate ganglion', category: 'Injection/Pain Management' },
+  { code: 'J0585', description: 'OnabotulinumtoxinA', category: 'Injection/Pain Management' },
+
+  { code: 'J7318', description: 'Durolane', category: 'Biologics/Viscosupplementation' },
+  { code: 'J7320', description: 'Genvic', category: 'Biologics/Viscosupplementation' },
+  { code: 'J7321', description: 'Hyalgan / Supartz visco-3 dose', category: 'Biologics/Viscosupplementation' },
+  { code: 'J7323', description: 'Euflexxa', category: 'Biologics/Viscosupplementation' },
+  { code: 'J7325', description: 'Synvisc or Synvisc-One', category: 'Biologics/Viscosupplementation' },
+  { code: 'J7328', description: 'Gel-Syn-3', category: 'Biologics/Viscosupplementation' },
+  { code: 'J7329', description: 'Trivisc', category: 'Biologics/Viscosupplementation' },
+];
+
 export const CLINIC_PODS = ['Pod A', 'Pod B', 'Pod C', 'Pod D'];
 
 export const PORTFOLIOS = [

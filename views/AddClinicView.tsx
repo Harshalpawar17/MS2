@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import PAYERS from '../data/payers.json';
-// new addedd line for serch options in the payer network coverage matrix above
+
 import { 
   Building2, 
   Plus, 
@@ -28,12 +28,6 @@ import {
 } from 'lucide-react';
 import { CLINIC_PODS, PORTFOLIOS } from '../constants';
 import { Clinic, Provider, InsuranceCredential, SystemAccess } from '../types';
-
-// const INITIAL_INSURANCE_LIST = [
-//   'Aetna', 'American Speciality Health', 'Ambetter', 'Anthem/BCBS', 
-//   'Caresource', 'Cigna', 'Humana', 'Medicaid', 'Medicare', 
-//   'Molina/Passport', 'Optum', 'TriCare', 'UMR', 'United Healthcare', 'Wellcare'
-// ];
 
 const INITIAL_INSURANCE_LIST = (PAYERS as string[]);
 
@@ -266,7 +260,6 @@ const AddClinicView: React.FC = () => {
   const addPayerMatrixRow = () => {
     setPayerMatrixRows((prev) => [
       ...prev,
-      // { company: "", groupStatus: "", provider1Status: "", provider2Status: "" },
       { id: crypto.randomUUID(), company: "", groupStatus: "", provider1Status: "", provider2Status: "" },
     ]);
   };
@@ -540,7 +533,7 @@ const AddClinicView: React.FC = () => {
                             e.stopPropagation();
                             deletePayerMatrixRow(row.id);
                           }}
-                          // className="inline-flex items-center justify-center h-9 w-9 rounded-xl border border-gray-200 bg-white text-secondary/50 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                          
                           className="inline-flex items-center justify-center h-9 w-9 rounded-xl border border-gray-200 bg-white text-secondary/50 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-all"
                           title="Delete row"
                         >
@@ -866,7 +859,7 @@ const AddClinicView: React.FC = () => {
                     <input
                       value={formData.medicarePtan || ''}
                       onChange={(e) => {
-                        // allow only digits, max 8 chars
+                        
                         const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 8);
                         setFormData({ ...formData, medicarePtan: digitsOnly });
                       }}
@@ -893,8 +886,6 @@ const AddClinicView: React.FC = () => {
                       Numeric only (max 15 digits).
                     </p> */}
                   </div>
-
-
 
                  <div className="space-y-1">
                   <label className="text-[10px] font-bold text-secondary uppercase tracking-widest ml-1">Phone Line</label>
