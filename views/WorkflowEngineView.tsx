@@ -112,11 +112,37 @@ type WorkflowAction =
   | ({ id: string; type: "ASSIGN_USER"; payload: { mode: "ROLE" | "DEPARTMENT" | "PERSON"; value: string } } & ActionIf)
   | ({ id: string; type: "SEND_EMAIL"; payload: { templateId: string; to: "clinic" | "agent" | "qa" } } & ActionIf)
   | ({ id: string; type: "SEND_FAX"; payload: { templateId: string; to: string } } & ActionIf)
-  | ({ id: string; type: "EXPIRE"; payload: { days: number } } & ActionIf)
-  | ({ id: string; type: "REQUEUE"; payload: { delayHours: number; delayMinutes: number; hiddenFromQueue: boolean } } & ActionIf)
+  | ({
+      id: string;
+      type: "EXPIRE";
+      payload: {
+        days: number;
+        queueName: string;
+        dispositionId: string;
+      };
+    } & ActionIf)
+  | ({
+    id: string;
+    type: "REQUEUE";
+    payload: {
+      delayHours: number;
+      delayMinutes: number;
+      hiddenFromQueue: boolean;
+      queueName: string;
+      dispositionId: string;
+    };
+  } & ActionIf)
   | ({ id: string; type: "API_CALL"; payload: { method: "GET" | "POST" | "PUT" | "DELETE"; url: string; headers: string; body: string } } & ActionIf)
   | ({ id: string; type: "GENERATE_PDF"; payload: { templateName: string; saveToDocuments: boolean } } & ActionIf)
-  | ({ id: string; type: "REQUEUE_LIMIT_CHECK"; payload: { maxCount: number; routeToResult: string } } & ActionIf)
+  | ({
+      id: string;
+      type: "REQUEUE_LIMIT_CHECK";
+      payload: {
+        maxCount: number;
+        queueName: string;
+        dispositionId: string;
+      };
+    } & ActionIf)
   | ({ id: string; type: "AUTO_CREATE_EV_ACCOUNT"; payload: {} } & ActionIf)
   | ({ id: string; type: "AUTO_CREATE_PA_ACCOUNT"; payload: {} } & ActionIf);
 
@@ -253,11 +279,23 @@ function summarizeAction(a: WorkflowAction) {
   if (a.type === "ASSIGN_USER") return `Assign → ${a.payload.mode}:${a.payload.value}`;
   if (a.type === "SEND_EMAIL") return `Email → ${a.payload.to} (template: ${a.payload.templateId})`;
   if (a.type === "SEND_FAX") return `Fax → ${a.payload.to} (template: ${a.payload.templateId})`;
-  if (a.type === "EXPIRE") return `Expire in ${a.payload.days} day(s)`;
-  if (a.type === "REQUEUE") return `Requeue ${a.payload.delayHours}h ${a.payload.delayMinutes}m`;
+  if (a.type === "EXPIRE") {
+    const queuePart = a.payload.queueName ? ` → ${a.payload.queueName}` : "";
+    const dispositionPart = a.payload.dispositionId ? ` → ${a.payload.dispositionId}` : "";
+    return `Expire in ${a.payload.days} day(s)${queuePart}${dispositionPart}`;
+  }
+  if (a.type === "REQUEUE") {
+    const queuePart = a.payload.queueName ? ` → ${a.payload.queueName}` : "";
+    const dispositionPart = a.payload.dispositionId ? ` → ${a.payload.dispositionId}` : "";
+    return `Requeue ${a.payload.delayHours}h ${a.payload.delayMinutes}m${queuePart}${dispositionPart}`;
+  }
   if (a.type === "API_CALL") return `API ${a.payload.method} → ${a.payload.url}`;
   if (a.type === "GENERATE_PDF") return `Generate PDF: ${a.payload.templateName}`;
-  if (a.type === "REQUEUE_LIMIT_CHECK") return `Requeue limit ≥ ${a.payload.maxCount}`;
+  if (a.type === "REQUEUE_LIMIT_CHECK") {
+    const queuePart = a.payload.queueName ? ` → ${a.payload.queueName}` : "";
+    const dispositionPart = a.payload.dispositionId ? ` → ${a.payload.dispositionId}` : "";
+    return `Requeue limit ≥ ${a.payload.maxCount}${queuePart}${dispositionPart}`;
+  }
   if (a.type === "AUTO_CREATE_EV_ACCOUNT") return "Auto-create EV account";
   if (a.type === "AUTO_CREATE_PA_ACCOUNT") return "Auto-create PA account";
   const exhaustive: never = a;
@@ -651,26 +689,33 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
       };
     }
 
-    const matchingIf = outgoing.find((e) => {
-      const g = e.conditionGroup;
-      if (!g || !g.items || g.items.length === 0) return false;
-      return groupMatches(g, inputs);
-    });
+    let chosen: HubEdge | null = null;
 
-    const elseEdge =
-      outgoing.find((e) => !e.conditionGroup || (e.conditionGroup.items?.length ?? 0) === 0) || null;
+    if (current.kind === "DECISION") {
+      const matchingIf = outgoing.find((e) => {
+        const g = e.conditionGroup;
+        if (!g || !g.items || g.items.length === 0) return false;
+        return groupMatches(g, inputs);
+      });
 
-    const chosen = matchingIf || elseEdge;
+      const elseEdge =
+        outgoing.find((e) => !e.conditionGroup || (e.conditionGroup.items?.length ?? 0) === 0) || null;
 
-    if (!chosen) {
-      return {
-        ok: true as const,
-        reason: `Stopped: no matching IF branch from "${current.name}" and no ELSE branch.`,
-        executed,
-        finalStatus,
-        assignedTo,
-        chosenPath: lastPath,
-      };
+      chosen = matchingIf || elseEdge;
+
+      if (!chosen) {
+        return {
+          ok: true as const,
+          reason: `Stopped: no matching IF branch from decision "${current.name}" and no ELSE branch.`,
+          executed,
+          finalStatus,
+          assignedTo,
+          chosenPath: lastPath,
+        };
+      }
+    } else {
+      // Non-decision nodes should continue through the first ordered path only.
+      chosen = outgoing[0];
     }
 
     const next = def.nodes.find((n) => n.id === chosen.target);
@@ -696,6 +741,37 @@ function simulate(def: WorkflowDefinition, inputs: EvalInputs) {
   }
 
   return { ok: true as const, reason: "Completed.", executed, finalStatus, assignedTo, chosenPath: lastPath };
+}
+
+function validateDecisionNodes(def: WorkflowDefinition): string[] {
+  const errors: string[] = [];
+
+  for (const node of def.nodes) {
+    if (node.kind !== "DECISION") continue;
+
+    const outgoing = def.edges
+      .filter((e) => e.source === node.id)
+      .slice()
+      .sort((a, b) => a.priority - b.priority);
+
+    if (outgoing.length < 2) {
+      errors.push(`Decision node "${node.name}" must have at least 2 outgoing branches.`);
+      continue;
+    }
+
+    const ifEdges = outgoing.filter((e) => e.conditionGroup && (e.conditionGroup.items?.length ?? 0) > 0);
+    const elseEdges = outgoing.filter((e) => !e.conditionGroup || (e.conditionGroup.items?.length ?? 0) === 0);
+
+    if (ifEdges.length === 0) {
+      errors.push(`Decision node "${node.name}" must have at least one IF branch.`);
+    }
+
+    if (elseEdges.length !== 1) {
+      errors.push(`Decision node "${node.name}" must have exactly one ELSE branch.`);
+    }
+  }
+
+  return errors;
 }
 
 /** -----------------------------
@@ -852,7 +928,7 @@ const ConditionGroupEditor: React.FC<{
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_1.4fr] gap-3">
                 <div>
                   <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Field</p>
                   <select
@@ -1300,7 +1376,14 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
 
   // Queues (localStorage-persisted)
   const [queues, setQueues] = useLs<QueueRow[]>("wfe_queues", () => {
-    const uniq = Array.from(new Set(DEFAULT_DISPOSITIONS.map((d) => d.queue))).filter(Boolean).sort((a, b) => a.localeCompare(b as string));
+    const uniq = Array.from(
+      new Set(
+        DEFAULT_DISPOSITIONS
+          .map((d) => d.queue)
+          .filter((queue): queue is string => typeof queue === "string" && queue.trim().length > 0)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
     return uniq.map((name, i) => ({ id: `q-${i}`, name, enabled: true }));
   });
 
@@ -1434,19 +1517,27 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
     const def = selectedWorkflow.draft;
 
     const hasTrigger = def.nodes.some((n) => n.kind === "TRIGGER");
-    const hasEnd = def.nodes.some((n) => n.kind === "END");
-    if (!hasTrigger || !hasEnd) {
-      alert("Publish blocked: Workflow must have a TRIGGER node and an END node.");
-      return;
-    }
-    for (const e of def.edges) {
-      const fromOk = def.nodes.some((n) => n.id === e.source);
-      const toOk = def.nodes.some((n) => n.id === e.target);
-      if (!fromOk || !toOk) {
-        alert("Publish blocked: A branch references a missing node.");
+      const hasEnd = def.nodes.some((n) => n.kind === "END");
+
+      if (!hasTrigger || !hasEnd) {
+        alert("Publish blocked: Workflow must have a TRIGGER node and an END node.");
         return;
       }
-    }
+
+      for (const e of def.edges) {
+        const fromOk = def.nodes.some((n) => n.id === e.source);
+        const toOk = def.nodes.some((n) => n.id === e.target);
+        if (!fromOk || !toOk) {
+          alert("Publish blocked: A branch references a missing node.");
+          return;
+        }
+      }
+
+      const decisionErrors = validateDecisionNodes(def);
+      if (decisionErrors.length > 0) {
+        alert(`Publish blocked: ${decisionErrors[0]}`);
+        return;
+      }
 
     const t = nowIso();
     const nextVersion = Math.max(...selectedWorkflow.versions.map((v) => v.version), 0) + 1;
@@ -1583,19 +1674,27 @@ const WorkflowEngineHubspotFlow: React.FC = () => {
     const def = wf.draft;
 
     const hasTrigger = def.nodes.some((n) => n.kind === "TRIGGER");
-    const hasEnd = def.nodes.some((n) => n.kind === "END");
-    if (!hasTrigger || !hasEnd) {
-      alert("Publish blocked: Workflow must have a TRIGGER node and an END node.");
-      return;
-    }
-    for (const e of def.edges) {
-      const fromOk = def.nodes.some((n) => n.id === e.source);
-      const toOk = def.nodes.some((n) => n.id === e.target);
-      if (!fromOk || !toOk) {
-        alert("Publish blocked: A branch references a missing node.");
+      const hasEnd = def.nodes.some((n) => n.kind === "END");
+
+      if (!hasTrigger || !hasEnd) {
+        alert("Publish blocked: Workflow must have a TRIGGER node and an END node.");
         return;
       }
-    }
+
+      for (const e of def.edges) {
+        const fromOk = def.nodes.some((n) => n.id === e.source);
+        const toOk = def.nodes.some((n) => n.id === e.target);
+        if (!fromOk || !toOk) {
+          alert("Publish blocked: A branch references a missing node.");
+          return;
+        }
+      }
+
+      const decisionErrors = validateDecisionNodes(def);
+      if (decisionErrors.length > 0) {
+        alert(`Publish blocked: ${decisionErrors[0]}`);
+        return;
+      }
 
     const t = nowIso();
     const nextVersion = Math.max(...wf.versions.map((v) => v.version), 0) + 1;
@@ -2800,25 +2899,25 @@ const BuilderCanvasSection: React.FC<{
   };
   const [propertiesOpen, setPropertiesOpen] = useState(false);
 
-  if (!workflow) {
-    return (
-      <div className="bg-white border border-gray-100 rounded-[32px] p-8 space-y-6">
-        <div>
-          <h2 className="text-xl font-bold text-primaryText">Builder</h2>
-          <p className="text-secondary text-sm font-medium">Select a workflow first.</p>
-        </div>
+const def = workflow?.draft ?? { nodes: [], edges: [] };
+const publishedVersion = published?.version ?? 1;
+
+const initialFlowNodes = useMemo(() => toFlowNodes(def), [def]);
+const initialFlowEdges = useMemo(() => toFlowEdges(def), [def]);
+
+const [nodes, setNodes, onNodesChange] = useNodesState(initialFlowNodes);
+const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlowEdges);
+
+if (!workflow) {
+  return (
+    <div className="bg-white border border-gray-100 rounded-[32px] p-8 space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-primaryText">Builder</h2>
+        <p className="text-secondary text-sm font-medium">Select a workflow first.</p>
       </div>
-    );
-  }
-
-  const def = workflow.draft;
-  const publishedVersion = published?.version ?? 1;
-
-  const initialFlowNodes = useMemo(() => toFlowNodes(def), [def]);
-  const initialFlowEdges = useMemo(() => toFlowEdges(def), [def]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialFlowNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlowEdges);
+    </div>
+  );
+}
 
   const [saveFlash, setSaveFlash] = useState<string | null>(null);
 
@@ -2913,16 +3012,41 @@ const BuilderCanvasSection: React.FC<{
   const selectedNode = useMemo(() => def.nodes.find((n) => n.id === selectedNodeId) || null, [def.nodes, selectedNodeId]);
   const selectedEdge = useMemo(() => def.edges.find((e) => e.id === selectedEdgeId) || null, [def.edges, selectedEdgeId]);
 
+  const enabledQueueNames = useMemo(() => {
+    return Array.from(
+      new Set(
+        dispositions
+          .filter((d) => d.enabled)
+          .map((d) => d.queue)
+          .filter((queue): queue is string => typeof queue === "string" && queue.trim().length > 0)
+      )
+    ).sort((a: string, b: string) => a.localeCompare(b));
+  }, [dispositions]);
+
+  const getEnabledDispositionsByQueue = useCallback(
+    (queueName: string) => {
+      return dispositions.filter(
+        (d) => d.enabled && !!queueName && d.queue === queueName
+      );
+    },
+    [dispositions]
+  );
   const validateForPublish = (d: WorkflowDefinition) => {
     const hasTrigger = d.nodes.some((n) => n.kind === "TRIGGER");
     const hasEnd = d.nodes.some((n) => n.kind === "END");
+
     if (!hasTrigger) return "Workflow must have a TRIGGER node.";
     if (!hasEnd) return "Workflow must have an END node.";
+
     for (const e of d.edges) {
       const fromOk = d.nodes.some((n) => n.id === e.source);
       const toOk = d.nodes.some((n) => n.id === e.target);
       if (!fromOk || !toOk) return "A branch references a missing node.";
     }
+
+    const decisionErrors = validateDecisionNodes(d);
+    if (decisionErrors.length > 0) return decisionErrors[0];
+
     return null;
   };
   const validationError = validateForPublish(def);
@@ -3060,13 +3184,23 @@ const BuilderCanvasSection: React.FC<{
       EXPIRE: () => ({
         id: uid(),
         type: "EXPIRE",
-        payload: { days: 30 },
+        payload: {
+          days: 30,
+          queueName: "",
+          dispositionId: "",
+        },
         ifGroup: null,
       }),
       REQUEUE: () => ({
         id: uid(),
         type: "REQUEUE",
-        payload: { delayHours: 1, delayMinutes: 0, hiddenFromQueue: false },
+        payload: {
+          delayHours: 1,
+          delayMinutes: 0,
+          hiddenFromQueue: false,
+          queueName: "",
+          dispositionId: "",
+        },
         ifGroup: null,
       }),
       API_CALL: () => ({
@@ -3084,7 +3218,11 @@ const BuilderCanvasSection: React.FC<{
       REQUEUE_LIMIT_CHECK: () => ({
         id: uid(),
         type: "REQUEUE_LIMIT_CHECK",
-        payload: { maxCount: 3, routeToResult: "" },
+        payload: {
+          maxCount: 3,
+          queueName: "",
+          dispositionId: "",
+        },
         ifGroup: null,
       }),
       AUTO_CREATE_EV_ACCOUNT: () => ({
@@ -3172,6 +3310,16 @@ const BuilderCanvasSection: React.FC<{
       })
     );
   };
+
+  const getOutgoingEdgesForNode = useCallback(
+    (nodeId: string) => {
+      return def.edges
+        .filter((e) => e.source === nodeId)
+        .slice()
+        .sort((a, b) => a.priority - b.priority);
+    },
+    [def.edges]
+  );
 
   const onNodeDragStop = useCallback(() => syncDraft(nodes, edges), [edges, nodes, syncDraft]);
 
@@ -3345,7 +3493,7 @@ const BuilderCanvasSection: React.FC<{
       {propertiesOpen && (
         <>
           <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setPropertiesOpen(false)} />
-          <div className="fixed top-0 right-0 h-full z-50 w-full max-w-[420px] bg-white border-l border-gray-200 shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300">
+          <div className="fixed top-0 right-0 h-full z-50 w-full max-w-[620px] bg-white border-l border-gray-200 shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300">
             <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10">
               <div className="flex items-center gap-2 text-xs font-bold text-secondary uppercase tracking-wide">
                 <Settings2 size={16} /> Properties
@@ -3596,61 +3744,169 @@ const BuilderCanvasSection: React.FC<{
 
                                     {/* ── AUTOFILL_FIELDS ── */}
                                     {a.type === "AUTOFILL_FIELDS" && (
-                                      <div className="space-y-2">
-                                        {a.payload.fields.map((f, idx) => (
-                                          <div key={idx} className="grid grid-cols-3 gap-1">
-                                            <select value={f.key} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], key: e.target.value }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none">
-                                              <option value="">Field…</option>
-                                              {SYSTEM_FIELDS.map((sf) => <option key={sf.key} value={sf.key}>{sf.label}</option>)}
-                                            </select>
-                                            <select value={f.op} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], op: e.target.value as any }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none">
-                                              <option value="IS">IS</option>
-                                              <option value="IS_NOT">IS NOT</option>
-                                              <option value="EXISTS">EXISTS</option>
-                                            </select>
-                                            <input value={f.value} onChange={(e) => { const nx = a.payload.fields.slice(); nx[idx] = { ...nx[idx], value: e.target.value }; updateAction(selectedNode.id, { ...a, payload: { fields: nx } }); }} className="bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 text-xs outline-none" placeholder="value" disabled={f.op === "EXISTS"} />
-                                                                                      <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
-                                            <div className="flex items-center justify-between">
-                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
-                                                IF / THEN (Action Conditions)
-                                              </p>
+                                      <div className="space-y-3">
+                                        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
+                                          <p className="text-xs font-bold text-blue-700">Autofill Fields</p>
+                                          <p className="text-[11px] text-blue-700 mt-1">
+                                            Configure which system fields should be auto-populated. Each row is one field rule.
+                                          </p>
+                                        </div>
 
-                                              {a.ifGroup ? (
-                                                <button
-                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
-                                                  className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
-                                                  title="Remove conditions (always run)"
-                                                >
-                                                  Remove
-                                                </button>
-                                              ) : (
-                                                <button
-                                                  onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
-                                                  className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
-                                                  title="Add conditions (run only if matched)"
-                                                >
-                                                  + Add IF
-                                                </button>
-                                              )}
-                                            </div>
+                                        {a.payload.fields.length === 0 ? (
+                                          <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
+                                            No autofill fields added yet.
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-3">
+                                            {a.payload.fields.map((f, idx) => {
+                                              const selectedField = SYSTEM_FIELDS.find((sf) => sf.key === f.key);
 
-                                            {!a.ifGroup ? (
-                                              <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
-                                                No conditions — this action will always run.
-                                              </div>
+                                              return (
+                                                <div key={idx} className="border border-gray-100 rounded-2xl p-4 bg-gray-50 space-y-3">
+                                                  <div className="flex items-center justify-between">
+                                                    <div>
+                                                      <p className="text-xs font-bold text-primaryText">
+                                                        {selectedField?.label || `Field Rule ${idx + 1}`}
+                                                      </p>
+                                                      <p className="text-[11px] text-secondary">
+                                                        Choose field, operator, and value.
+                                                      </p>
+                                                    </div>
+
+                                                    <button
+                                                      onClick={() => {
+                                                        const nextFields = a.payload.fields.filter((_, fieldIndex) => fieldIndex !== idx);
+                                                        updateAction(selectedNode.id, {
+                                                          ...a,
+                                                          payload: { fields: nextFields },
+                                                        });
+                                                      }}
+                                                      className="px-2 py-1 rounded-lg bg-white border border-gray-200 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                    >
+                                                      Remove
+                                                    </button>
+                                                  </div>
+
+                                                  <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_1.4fr] gap-3">
+                                                    <div>
+                                                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Field</p>
+                                                      <select
+                                                        value={f.key}
+                                                        onChange={(e) => {
+                                                          const nextFields = a.payload.fields.slice();
+                                                          nextFields[idx] = { ...nextFields[idx], key: e.target.value };
+                                                          updateAction(selectedNode.id, {
+                                                            ...a,
+                                                            payload: { fields: nextFields },
+                                                          });
+                                                        }}
+                                                        className="bg-white border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                                      >
+                                                        <option value="">— Select Field —</option>
+                                                        {SYSTEM_FIELDS.map((sf) => (
+                                                          <option key={sf.key} value={sf.key}>
+                                                            {sf.label}
+                                                          </option>
+                                                        ))}
+                                                      </select>
+                                                    </div>
+
+                                                    <div>
+                                                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Operator</p>
+                                                      <select
+                                                        value={f.op}
+                                                        onChange={(e) => {
+                                                          const nextFields = a.payload.fields.slice();
+                                                          nextFields[idx] = { ...nextFields[idx], op: e.target.value as "IS" | "IS_NOT" | "EXISTS" };
+                                                          updateAction(selectedNode.id, {
+                                                            ...a,
+                                                            payload: { fields: nextFields },
+                                                          });
+                                                        }}
+                                                        className="bg-white border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                                      >
+                                                        <option value="IS">IS</option>
+                                                        <option value="IS_NOT">IS NOT</option>
+                                                        <option value="EXISTS">EXISTS</option>
+                                                      </select>
+                                                    </div>
+
+                                                    <div>
+                                                      <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Value</p>
+                                                      <input
+                                                        value={f.value}
+                                                        onChange={(e) => {
+                                                          const nextFields = a.payload.fields.slice();
+                                                          nextFields[idx] = { ...nextFields[idx], value: e.target.value };
+                                                          updateAction(selectedNode.id, {
+                                                            ...a,
+                                                            payload: { fields: nextFields },
+                                                          });
+                                                        }}
+                                                        disabled={f.op === "EXISTS"}
+                                                        className="bg-white border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full disabled:bg-gray-100 disabled:text-gray-400"
+                                                        placeholder={f.op === "EXISTS" ? "No value needed" : "Enter value"}
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+
+                                        <div className="flex gap-2">
+                                          <button
+                                            onClick={() =>
+                                              updateAction(selectedNode.id, {
+                                                ...a,
+                                                payload: {
+                                                  fields: [...a.payload.fields, { key: "", op: "IS" as const, value: "" }],
+                                                },
+                                              })
+                                            }
+                                            className="px-3 py-2 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-xs"
+                                          >
+                                            + Add Field
+                                          </button>
+                                        </div>
+
+                                        <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                          <div className="flex items-center justify-between">
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
+                                              IF / THEN (Action Conditions)
+                                            </p>
+
+                                            {a.ifGroup ? (
+                                              <button
+                                                onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: null })}
+                                                className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-[10px]"
+                                                title="Remove conditions (always run)"
+                                              >
+                                                Remove
+                                              </button>
                                             ) : (
-                                              <ConditionGroupEditor
-                                                title="Run this action only if…"
-                                                group={a.ifGroup}
-                                                onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
-                                              />
+                                              <button
+                                                onClick={() => updateAction(selectedNode.id, { ...a, ifGroup: makeEmptyGroup() })}
+                                                className="px-2 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold hover:bg-primary/20 transition text-[10px]"
+                                                title="Add conditions (run only if matched)"
+                                              >
+                                                + Add IF
+                                              </button>
                                             )}
                                           </div>
-                                          </div>
-                                        ))}
-                                        <div className="flex gap-1">
-                                          <button onClick={() => updateAction(selectedNode.id, { ...a, payload: { fields: [...a.payload.fields, { key: "", op: "IS" as const, value: "" }] } })} className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold text-[10px]">+ Field</button>
-                                          {a.payload.fields.length > 0 && <button onClick={() => updateAction(selectedNode.id, { ...a, payload: { fields: a.payload.fields.slice(0, -1) } })} className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-secondary font-bold text-[10px]">− Remove</button>}
+
+                                          {!a.ifGroup ? (
+                                            <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
+                                              No conditions — this action will always run.
+                                            </div>
+                                          ) : (
+                                            <ConditionGroupEditor
+                                              title="Run this action only if…"
+                                              group={a.ifGroup}
+                                              onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
+                                            />
+                                          )}
                                         </div>
                                       </div>
                                     )}
@@ -3826,12 +4082,90 @@ const BuilderCanvasSection: React.FC<{
                                     )}
 
                                     {/* ── EXPIRE ── */}
-                                    {a.type === "EXPIRE" && (
-                                      <div>
-                                        <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Expire After (Days)</p>
-                                        <input type="number" min={1} value={a.payload.days} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { days: Number(e.target.value) || 1 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
-                                        <p className="text-[10px] text-secondary mt-1">Items in EV/PA queues expire after this many days.</p>
-                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                    {a.type === "EXPIRE" && (() => {
+                                      const filteredDispositionOptions = getEnabledDispositionsByQueue(a.payload.queueName ?? "");
+
+                                      return (
+                                        <div className="space-y-3">
+                                          <div className="rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3">
+                                            <p className="text-xs font-bold text-orange-700">Expire Flow</p>
+                                            <p className="text-[11px] text-orange-700 mt-1">
+                                              Set expiry days, then choose the queue and disposition where the expired item should go.
+                                            </p>
+                                          </div>
+
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Expire After (Days)</p>
+                                            <input
+                                              type="number"
+                                              min={1}
+                                              value={a.payload.days}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, {
+                                                  ...a,
+                                                  payload: {
+                                                    ...a.payload,
+                                                    days: Number(e.target.value) || 1,
+                                                  },
+                                                })
+                                              }
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                            />
+                                          </div>
+
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Queue</p>
+                                            <select
+                                              value={a.payload.queueName ?? ""}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, {
+                                                  ...a,
+                                                  payload: {
+                                                    ...a.payload,
+                                                    queueName: e.target.value,
+                                                    dispositionId: "",
+                                                  },
+                                                })
+                                              }
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                            >
+                                              <option value="">— Select Queue —</option>
+                                              {enabledQueueNames.map((queueName) => (
+                                                <option key={queueName} value={queueName}>
+                                                  {queueName}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Disposition</p>
+                                            <select
+                                              value={a.payload.dispositionId ?? ""}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, {
+                                                  ...a,
+                                                  payload: {
+                                                    ...a.payload,
+                                                    dispositionId: e.target.value,
+                                                  },
+                                                })
+                                              }
+                                              disabled={!(a.payload.queueName ?? "")}
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full disabled:bg-gray-100 disabled:text-gray-400"
+                                            >
+                                              <option value="">
+                                                {a.payload.queueName ? "— Select Disposition —" : "Select Queue First"}
+                                              </option>
+                                              {filteredDispositionOptions.map((d) => (
+                                                <option key={d.id} value={d.id}>
+                                                  {d.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
                                             <div className="flex items-center justify-between">
                                               <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
                                                 IF / THEN (Action Conditions)
@@ -3867,28 +4201,140 @@ const BuilderCanvasSection: React.FC<{
                                                 onChange={(g) => updateAction(selectedNode.id, { ...a, ifGroup: g })}
                                               />
                                             )}
-                                          </div>
-                                      </div>
-                                    )}
-
-                                    {/* ── REQUEUE ── */}
-                                    {a.type === "REQUEUE" && (
-                                      <div className="space-y-2">
-                                        <div className="grid grid-cols-2 gap-2">
-                                          <div>
-                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Hours</p>
-                                            <input type="number" min={0} value={a.payload.delayHours} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, delayHours: Number(e.target.value) || 0 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
-                                          </div>
-                                          <div>
-                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Minutes</p>
-                                            <input type="number" min={0} max={59} value={a.payload.delayMinutes} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, delayMinutes: Number(e.target.value) || 0 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
                                           </div>
                                         </div>
-                                        <label className="flex items-center gap-2 text-xs text-primaryText cursor-pointer">
-                                          <input type="checkbox" checked={a.payload.hiddenFromQueue} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, hiddenFromQueue: e.target.checked } })} className="rounded" />
-                                          Hidden from queue (visible to managers only)
-                                        </label>
-                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                      );
+                                    })()}
+
+                                    {/* ── REQUEUE ── */}
+                                    {a.type === "REQUEUE" && (() => {
+                                      const enabledQueues = Array.from(
+                                        new Set(
+                                          dispositions
+                                            .filter((d) => d.enabled)
+                                            .map((d) => d.queue)
+                                            .filter((queue): queue is string => typeof queue === "string" && queue.trim().length > 0)
+                                        )
+                                      ).sort((x: string, y: string) => x.localeCompare(y));
+
+                                      const filteredDispositionOptions = dispositions.filter(
+                                        (d) => d.enabled && (!!(a.payload.queueName ?? "") ? d.queue === a.payload.queueName : false)
+                                      );
+
+                                      return (
+                                        <div className="space-y-3">
+                                          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
+                                            <p className="text-xs font-bold text-blue-700">Requeue Flow</p>
+                                            <p className="text-[11px] text-blue-700 mt-1">
+                                              First select a queue, then select a disposition from that queue.
+                                            </p>
+                                          </div>
+
+                                          <div className="grid grid-cols-1 gap-3">
+                                            <div>
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Queue</p>
+                                              <select
+                                                value={a.payload.queueName ?? ""}
+                                                onChange={(e) =>
+                                                  updateAction(selectedNode.id, {
+                                                    ...a,
+                                                    payload: {
+                                                      ...a.payload,
+                                                      queueName: e.target.value,
+                                                      dispositionId: "",
+                                                    },
+                                                  })
+                                                }
+                                                className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                              >
+                                                <option value="">— Select Queue —</option>
+                                                {enabledQueues.map((queueName) => (
+                                                  <option key={queueName} value={queueName}>
+                                                    {queueName}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </div>
+
+                                            <div>
+                                              <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Disposition</p>
+                                              <select
+                                                value={a.payload.dispositionId ?? ""}
+                                                onChange={(e) =>
+                                                  updateAction(selectedNode.id, {
+                                                    ...a,
+                                                    payload: {
+                                                      ...a.payload,
+                                                      dispositionId: e.target.value,
+                                                    },
+                                                  })
+                                                }
+                                                disabled={!(a.payload.queueName ?? "")}
+                                                className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full disabled:bg-gray-100 disabled:text-gray-400"
+                                              >
+                                                <option value="">
+                                                  {a.payload.queueName ? "— Select Disposition —" : "Select Queue First"}
+                                                </option>
+                                                {filteredDispositionOptions.map((d) => (
+                                                  <option key={d.id} value={d.id}>
+                                                    {d.name}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <div>
+                                                <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Hours</p>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={a.payload.delayHours}
+                                                  onChange={(e) =>
+                                                    updateAction(selectedNode.id, {
+                                                      ...a,
+                                                      payload: { ...a.payload, delayHours: Number(e.target.value) || 0 },
+                                                    })
+                                                  }
+                                                  className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                                />
+                                              </div>
+
+                                              <div>
+                                                <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Minutes</p>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  max={59}
+                                                  value={a.payload.delayMinutes}
+                                                  onChange={(e) =>
+                                                    updateAction(selectedNode.id, {
+                                                      ...a,
+                                                      payload: { ...a.payload, delayMinutes: Number(e.target.value) || 0 },
+                                                    })
+                                                  }
+                                                  className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                                />
+                                              </div>
+                                            </div>
+
+                                            <label className="flex items-center gap-2 text-xs text-primaryText cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={a.payload.hiddenFromQueue}
+                                                onChange={(e) =>
+                                                  updateAction(selectedNode.id, {
+                                                    ...a,
+                                                    payload: { ...a.payload, hiddenFromQueue: e.target.checked },
+                                                  })
+                                                }
+                                                className="rounded"
+                                              />
+                                              Hidden from queue (visible to managers only)
+                                            </label>
+                                          </div>
+
+                                          <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
                                             <div className="flex items-center justify-between">
                                               <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
                                                 IF / THEN (Action Conditions)
@@ -3925,8 +4371,9 @@ const BuilderCanvasSection: React.FC<{
                                               />
                                             )}
                                           </div>
-                                      </div>
-                                    )}
+                                        </div>
+                                      );
+                                    })()}
 
                                     {/* ── API_CALL ── */}
                                     {a.type === "API_CALL" && (
@@ -4052,20 +4499,90 @@ const BuilderCanvasSection: React.FC<{
                                     )}
 
                                     {/* ── REQUEUE_LIMIT_CHECK ── */}
-                                    {a.type === "REQUEUE_LIMIT_CHECK" && (
-                                      <div className="space-y-2">
-                                        <div>
-                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">If requeueCount ≥</p>
-                                          <input type="number" min={1} value={a.payload.maxCount} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, maxCount: Number(e.target.value) || 1 } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full" />
-                                        </div>
-                                        <div>
-                                          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Then route to Result</p>
-                                          <select value={a.payload.routeToResult} onChange={(e) => updateAction(selectedNode.id, { ...a, payload: { ...a.payload, routeToResult: e.target.value } })} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full">
-                                            <option value="">— Select Result —</option>
-                                            {(selectedNode.results || []).map((r: string) => <option key={r} value={r}>{r}</option>)}
-                                          </select>
-                                        </div>
-                                                                                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                                    {a.type === "REQUEUE_LIMIT_CHECK" && (() => {
+                                      const filteredDispositionOptions = getEnabledDispositionsByQueue(a.payload.queueName ?? "");
+
+                                      return (
+                                        <div className="space-y-3">
+                                          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
+                                            <p className="text-xs font-bold text-blue-700">Requeue Limit Flow</p>
+                                            <p className="text-[11px] text-blue-700 mt-1">
+                                              When requeue count reaches the limit, select the queue and disposition where the item should move.
+                                            </p>
+                                          </div>
+
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">If requeueCount ≥</p>
+                                            <input
+                                              type="number"
+                                              min={1}
+                                              value={a.payload.maxCount}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, {
+                                                  ...a,
+                                                  payload: {
+                                                    ...a.payload,
+                                                    maxCount: Number(e.target.value) || 1,
+                                                  },
+                                                })
+                                              }
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                            />
+                                          </div>
+
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Queue</p>
+                                            <select
+                                              value={a.payload.queueName ?? ""}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, {
+                                                  ...a,
+                                                  payload: {
+                                                    ...a.payload,
+                                                    queueName: e.target.value,
+                                                    dispositionId: "",
+                                                  },
+                                                })
+                                              }
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full"
+                                            >
+                                              <option value="">— Select Queue —</option>
+                                              {enabledQueueNames.map((queueName) => (
+                                                <option key={queueName} value={queueName}>
+                                                  {queueName}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          <div>
+                                            <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Disposition</p>
+                                            <select
+                                              value={a.payload.dispositionId ?? ""}
+                                              onChange={(e) =>
+                                                updateAction(selectedNode.id, {
+                                                  ...a,
+                                                  payload: {
+                                                    ...a.payload,
+                                                    dispositionId: e.target.value,
+                                                  },
+                                                })
+                                              }
+                                              disabled={!(a.payload.queueName ?? "")}
+                                              className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm outline-none w-full disabled:bg-gray-100 disabled:text-gray-400"
+                                            >
+                                              <option value="">
+                                                {a.payload.queueName ? "— Select Disposition —" : "Select Queue First"}
+                                              </option>
+                                              {filteredDispositionOptions.map((d) => (
+                                                <option key={d.id} value={d.id}>
+                                                  {d.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
                                             <div className="flex items-center justify-between">
                                               <p className="text-[10px] font-bold text-secondary uppercase tracking-wide">
                                                 IF / THEN (Action Conditions)
@@ -4102,8 +4619,9 @@ const BuilderCanvasSection: React.FC<{
                                               />
                                             )}
                                           </div>
-                                      </div>
-                                    )}
+                                        </div>
+                                      );
+                                    })()}
 
                                     {(a.type === "AUTO_CREATE_EV_ACCOUNT" || a.type === "AUTO_CREATE_PA_ACCOUNT") && (
                                       <div className="text-[11px] text-secondary border border-gray-100 rounded-xl p-3 bg-gray-50">
@@ -4157,11 +4675,125 @@ const BuilderCanvasSection: React.FC<{
                       </div>
                     )}
 
-                    {selectedNode.kind === "DECISION" && (
-                      <div className="text-[11px] text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
-                        Create IF/ELSE branches by selecting an arrow and setting it to IF (with conditions) or ELSE (default).
-                      </div>
-                    )}
+                    {selectedNode.kind === "DECISION" && (() => {
+                      const outgoingEdges = getOutgoingEdgesForNode(selectedNode.id);
+
+                      return (
+                        <div className="space-y-4">
+                          <div className="text-[11px] text-secondary border border-blue-100 rounded-2xl p-4 bg-blue-50 space-y-2">
+                            <p className="font-bold text-blue-700">Decision Block Setup</p>
+                            <p className="text-blue-700">
+                              Configure the decision branches directly here. This makes IF / ELSE usable without selecting arrows one by one.
+                            </p>
+                          </div>
+
+                          {outgoingEdges.length === 0 ? (
+                            <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
+                              No outgoing branches yet. Connect this decision node to other nodes first.
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              {outgoingEdges.map((edge) => (
+                                <div key={edge.id} className="border border-gray-100 rounded-2xl p-4 bg-white space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-sm font-bold text-primaryText">Branch</div>
+                                    <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-secondary">
+                                      Priority {edge.priority}
+                                    </span>
+                                  </div>
+
+                                  <div>
+                                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Label</p>
+                                    <input
+                                      value={edge.label || ""}
+                                      onChange={(e) => updateEdgeMeta(edge.id, { label: e.target.value })}
+                                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
+                                      placeholder="IF Eligible / ELSE"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <p className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1">Priority</p>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={edge.priority}
+                                      onChange={(e) => updateEdgeMeta(edge.id, { priority: Number(e.target.value) || 1 })}
+                                      className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-sm text-primaryText outline-none w-full"
+                                    />
+                                  </div>
+
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setSelectedEdgeId(edge.id);
+                                        setSelectedNodeId(null);
+                                        const next = def.edges.map((e) =>
+                                          e.id === edge.id
+                                            ? {
+                                                ...e,
+                                                label: e.label?.startsWith("ELSE") ? "IF" : e.label || "IF",
+                                                priority: Math.max(1, e.priority || 1),
+                                                conditionGroup: e.conditionGroup && e.conditionGroup.items.length ? e.conditionGroup : makeEmptyGroup(),
+                                              }
+                                            : e
+                                        );
+                                        onDraftChange({ ...def, edges: next });
+                                        setEdges((prev) =>
+                                          prev.map((e) =>
+                                            e.id === edge.id
+                                              ? { ...e, data: { ...(e.data as any), isElse: false, label: "IF", priority: (e.data as any)?.priority ?? 1 } }
+                                              : e
+                                          )
+                                        );
+                                      }}
+                                      className="flex-1 px-4 py-3 rounded-2xl bg-white border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
+                                    >
+                                      Set as IF
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setSelectedEdgeId(edge.id);
+                                        setSelectedNodeId(null);
+                                        const next = def.edges.map((e) =>
+                                          e.id === edge.id
+                                            ? { ...e, label: "ELSE", priority: 999, conditionGroup: null }
+                                            : e
+                                        );
+                                        onDraftChange({ ...def, edges: next });
+                                        setEdges((prev) =>
+                                          prev.map((e) =>
+                                            e.id === edge.id
+                                              ? { ...e, data: { ...(e.data as any), isElse: true, label: "ELSE", priority: 999 } }
+                                              : e
+                                          )
+                                        );
+                                      }}
+                                      className="flex-1 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100 text-secondary font-bold hover:bg-gray-100 transition text-xs"
+                                    >
+                                      Set as ELSE
+                                    </button>
+                                  </div>
+
+                                  {!edge.conditionGroup ? (
+                                    <div className="text-sm text-secondary border border-gray-100 rounded-2xl p-4 bg-gray-50">
+                                      This branch is <span className="font-bold text-primaryText">ELSE</span>. No conditions required.
+                                    </div>
+                                  ) : (
+                                    <ConditionGroupEditor
+                                      title="IF Conditions"
+                                      group={edge.conditionGroup}
+                                      onChange={(g) => updateEdgeMeta(edge.id, { conditionGroup: g })}
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
