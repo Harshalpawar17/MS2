@@ -363,7 +363,20 @@ const AccountSummaryTab: React.FC<{ patient: any }> = ({ patient }) => {
             </div>
           </div>
 
-          
+          <div className="pt-6 border-t border-gray-50">
+            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">Cardholder Information</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <SelectField 
+                label="Relationship" 
+                value={secondaryData.relationship} 
+                options={['Self', 'Spouse', 'Child', 'Other']} 
+                onChange={(v) => setSecondaryData({...secondaryData, relationship: v})} 
+              />
+              <EditField label="First Name" value={secondaryData.firstName} onChange={(v) => setSecondaryData({...secondaryData, firstName: v})} />
+              <EditField label="Last Name" value={secondaryData.lastName} onChange={(v) => setSecondaryData({...secondaryData, lastName: v})} />
+              <EditField label="Date of Birth" value={secondaryData.dob} type="date" onChange={(v) => setSecondaryData({...secondaryData, dob: v})} />
+            </div>
+          </div>
         </div>
       )}
 
@@ -507,7 +520,7 @@ const AccountSummaryTab: React.FC<{ patient: any }> = ({ patient }) => {
         </div>
 
         <div className="pt-6">
-          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">Chiropractic Coverage </h3>
+          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">Chiropractic Coverage</h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <EditField label="Copay ($)" value={coverageData.chiropracticCopay} onChange={(v) => setCoverageData({...coverageData, chiropracticCopay: v})} />
             <EditField label="Coinsurance (%)" value={coverageData.chiropracticCoinsurance} onChange={(v) => setCoverageData({...coverageData, chiropracticCoinsurance: v})} />
@@ -785,47 +798,258 @@ const PADataTab: React.FC<{ patient: any }> = ({ patient }) => {
 };
 
 const PITab: React.FC<{ patient: any }> = ({ patient }) => {
+  const [piData, setPiData] = useState({
+    firstName: patient.patientName?.split(' ')[0] || '',
+    lastName: patient.patientName?.split(' ').slice(1).join(' ') || '',
+    dob: patient.dob || '',
+    gender: 'Male',
+    dateOfIncident: '2024-02-15',
+    caseType: 'Auto Incident',
+    carrier: 'State Farm',
+    claimNumber: 'SF-992211',
+    carrierPhone: '888-555-0123',
+    carrierFax: '',
+    carrierEmail: '',
+    carrierName: '',
+    adjusterName: 'Mike Wilson',
+    adjusterPhone: '888-555-0123',
+    adjusterFax: '',
+    adjusterEmail: '',
+    caseManagerName: '',
+    caseManagerEmail: '',
+    caseManagerContact: '',
+    specificClaimId: '',
+    attorneyFirstName: '',
+    attorneyLastName: '',
+    attorneyPhone: '',
+    attorneyFax: '',
+    attorneyEmail: '',
+    medInsuranceCompany: '',
+    medPolicyId: '',
+    medGroupId: '',
+    medSubscriberName: '',
+    lastDos: '',
+    lastPaymentDate: '',
+    totalCharges: '',
+    paidToDate: '',
+    accountBalance: '',
+    lastPayment: '',
+    lastPaymentMethod: ''
+  });
+
+  const [hasAttorney, setHasAttorney] = useState(false);
+  const [isLopSent, setIsLopSent] = useState(false);
+  const [hasMedicalInsurance, setHasMedicalInsurance] = useState(false);
+
   return (
     <div className="space-y-8">
+      {/* Patient Information */}
       <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900">Incident Details</h2>
+        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+          <User size={20} className="text-primary" />
+          <span>Patient Information</span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <EditField label="First Name" value={piData.firstName} onChange={(v) => setPiData({...piData, firstName: v})} />
+          <EditField label="Last Name" value={piData.lastName} onChange={(v) => setPiData({...piData, lastName: v})} />
+          <EditField label="Date of Birth" value={piData.dob} type="date" onChange={(v) => setPiData({...piData, dob: v})} />
+          <SelectField label="Gender" value={piData.gender} options={['Male', 'Female', 'Other']} onChange={(v) => setPiData({...piData, gender: v})} />
+        </div>
+      </div>
+
+      {/* Incident Details */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+          <AlertTriangle size={20} className="text-primary" />
+          <span>Incident Details</span>
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <DataField label="Date of Accident" value="2024-02-15" />
-          <DataField label="Case Type" value="Personal Injury" />
+          <EditField label="Date of Incident" value={piData.dateOfIncident} type="date" onChange={(v) => setPiData({...piData, dateOfIncident: v})} />
+          <SelectField 
+            label="Case Type" 
+            value={piData.caseType} 
+            options={['Slip and Fall', 'Worker Compensation', 'Auto Incident']} 
+            onChange={(v) => setPiData({...piData, caseType: v})} 
+          />
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900">Liability Carrier & Adjuster</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <DataField label="Carrier" value="State Farm" />
-          <DataField label="Adjuster Name" value="Mike Wilson" />
-          <DataField label="Adjuster Phone" value="888-555-0123" />
-          <DataField label="Claim ID" value="SF-992211" />
+      {/* Liability Carrier & Adjuster */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-8">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+            <Shield size={20} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Liability Carrier & Adjuster</h2>
         </div>
-      </div>
 
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900">Attorney Information</h2>
-        <div className="p-4 bg-gray-50 rounded-2xl">
-          <p className="text-sm font-bold text-gray-700">Does patient have an attorney?</p>
-          <div className="flex items-center space-x-4 mt-2">
-            <span className="px-4 py-1.5 bg-primary text-white rounded-lg text-xs font-bold">Yes</span>
-            <span className="px-4 py-1.5 bg-white border border-gray-200 text-gray-400 rounded-lg text-xs font-bold">No</span>
+        {/* Liability Carrier */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Liability Carrier</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <SelectField 
+              label="Insurance Company" 
+              value={piData.carrier} 
+              options={['State Farm', 'Geico', 'Progressive', 'Allstate']} 
+              onChange={(v) => setPiData({...piData, carrier: v})} 
+            />
+            <EditField label="Claim Number" value={piData.claimNumber} onChange={(v) => setPiData({...piData, claimNumber: v})} />
+            <EditField label="Carrier Phone" value={piData.carrierPhone} onChange={(v) => setPiData({...piData, carrierPhone: v})} />
+            <EditField label="Carrier Fax" value={piData.carrierFax} onChange={(v) => setPiData({...piData, carrierFax: v})} />
+            <EditField label="Carrier Email" value={piData.carrierEmail} onChange={(v) => setPiData({...piData, carrierEmail: v})} />
+            <EditField label="Carrier Name" value={piData.carrierName} onChange={(v) => setPiData({...piData, carrierName: v})} />
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <DataField label="Law Firm" value="Morgan & Morgan" />
-          <DataField label="Attorney Name" value="John Morgan" />
+
+        {/* Adjuster Information */}
+        <div className="pt-6 border-t border-gray-50 space-y-4">
+          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Adjuster Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <EditField label="Adjuster Name" value={piData.adjusterName} onChange={(v) => setPiData({...piData, adjusterName: v})} />
+            <EditField label="Adjuster Phone" value={piData.adjusterPhone} onChange={(v) => setPiData({...piData, adjusterPhone: v})} />
+            <EditField label="Adjuster Fax" value={piData.adjusterFax} onChange={(v) => setPiData({...piData, adjusterFax: v})} />
+            <EditField label="Adjuster Email" value={piData.adjusterEmail} onChange={(v) => setPiData({...piData, adjusterEmail: v})} />
+          </div>
+        </div>
+      </div>
+
+      {/* Case Manager */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+          <User size={20} className="text-primary" />
+          <span>Case Manager</span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <EditField label="Name" value={piData.caseManagerName} onChange={(v) => setPiData({...piData, caseManagerName: v})} />
+          <EditField label="Email" value={piData.caseManagerEmail} onChange={(v) => setPiData({...piData, caseManagerEmail: v})} />
+          <EditField label="Primary Contact" value={piData.caseManagerContact} onChange={(v) => setPiData({...piData, caseManagerContact: v})} />
+        </div>
+      </div>
+
+      {/* PI / WC Specific Claim ID */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+          <Shield size={20} className="text-primary" />
+          <span>PI / WC Specific Claim ID</span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <EditField label="Claim ID" value={piData.specificClaimId} onChange={(v) => setPiData({...piData, specificClaimId: v})} />
+        </div>
+      </div>
+
+      {/* Conditional Questions */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-8">
+        <div className="space-y-6">
+          <div className="p-4 bg-gray-50 rounded-2xl">
+            <p className="text-sm font-bold text-gray-700">Does the patient have an attorney?</p>
+            <div className="flex items-center space-x-4 mt-2">
+              <button 
+                onClick={() => setHasAttorney(true)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${hasAttorney ? 'bg-primary text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+              >
+                Yes
+              </button>
+              <button 
+                onClick={() => setHasAttorney(false)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${!hasAttorney ? 'bg-primary text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+              >
+                No
+              </button>
+            </div>
+          </div>
+
+          {hasAttorney && (
+            <div className="p-6 bg-gray-50/50 border border-gray-100 rounded-3xl space-y-6 animate-in slide-in-from-top-2 duration-300">
+              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Attorney Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <EditField label="Attorney First Name" value={piData.attorneyFirstName} onChange={(v) => setPiData({...piData, attorneyFirstName: v})} />
+                <EditField label="Attorney Last Name" value={piData.attorneyLastName} onChange={(v) => setPiData({...piData, attorneyLastName: v})} />
+                <EditField label="Attorney Phone" value={piData.attorneyPhone} onChange={(v) => setPiData({...piData, attorneyPhone: v})} />
+                <EditField label="Attorney Fax Number" value={piData.attorneyFax} onChange={(v) => setPiData({...piData, attorneyFax: v})} />
+                <EditField label="Attorney Email" value={piData.attorneyEmail} onChange={(v) => setPiData({...piData, attorneyEmail: v})} />
+              </div>
+            </div>
+          )}
+
+          <div className="p-4 bg-gray-50 rounded-2xl">
+            <p className="text-sm font-bold text-gray-700">Was the LOP sent to the attorney?</p>
+            <div className="flex items-center space-x-4 mt-2">
+              <button 
+                onClick={() => setIsLopSent(true)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${isLopSent ? 'bg-primary text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+              >
+                Yes
+              </button>
+              <button 
+                onClick={() => setIsLopSent(false)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${!isLopSent ? 'bg-primary text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+              >
+                No
+              </button>
+            </div>
+          </div>
+
+          {isLopSent && (
+            <div className="p-6 bg-gray-50/50 border border-gray-100 rounded-3xl space-y-6 animate-in slide-in-from-top-2 duration-300">
+              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">LOP Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <EditField label="Last DOS" value={piData.lastDos} type="date" onChange={(v) => setPiData({...piData, lastDos: v})} />
+                <EditField label="Last Payment Date" value={piData.lastPaymentDate} type="date" onChange={(v) => setPiData({...piData, lastPaymentDate: v})} />
+                <EditField label="Total Charges" value={piData.totalCharges} onChange={(v) => setPiData({...piData, totalCharges: v})} />
+                <EditField label="Paid to Date" value={piData.paidToDate} onChange={(v) => setPiData({...piData, paidToDate: v})} />
+                <EditField label="Account Balance" value={piData.accountBalance} onChange={(v) => setPiData({...piData, accountBalance: v})} />
+                <EditField label="Last Payment" value={piData.lastPayment} onChange={(v) => setPiData({...piData, lastPayment: v})} />
+                <SelectField 
+                  label="Last Payment Method" 
+                  value={piData.lastPaymentMethod} 
+                  options={['Cash', 'Check', 'Card', 'ACH', 'Wire', 'Other']} 
+                  onChange={(v) => setPiData({...piData, lastPaymentMethod: v})} 
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="p-4 bg-gray-50 rounded-2xl">
+            <p className="text-sm font-bold text-gray-700">Does the patient have medical insurance?</p>
+            <div className="flex items-center space-x-4 mt-2">
+              <button 
+                onClick={() => setHasMedicalInsurance(true)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${hasMedicalInsurance ? 'bg-primary text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+              >
+                Yes
+              </button>
+              <button 
+                onClick={() => setHasMedicalInsurance(false)}
+                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${!hasMedicalInsurance ? 'bg-primary text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+              >
+                No
+              </button>
+            </div>
+          </div>
+
+          {hasMedicalInsurance && (
+            <div className="p-6 bg-gray-50/50 border border-gray-100 rounded-3xl space-y-6 animate-in slide-in-from-top-2 duration-300">
+              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Medical Insurance Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <EditField label="Insurance Company" value={piData.medInsuranceCompany} onChange={(v) => setPiData({...piData, medInsuranceCompany: v})} />
+                <EditField label="Policy ID" value={piData.medPolicyId} onChange={(v) => setPiData({...piData, medPolicyId: v})} />
+                <EditField label="Group ID" value={piData.medGroupId} onChange={(v) => setPiData({...piData, medGroupId: v})} />
+                <EditField label="Subscriber Name" value={piData.medSubscriberName} onChange={(v) => setPiData({...piData, medSubscriberName: v})} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900">Complete PI Task</h2>
+        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+          <CheckSquare size={20} className="text-primary" />
+          <span>Complete PI Task</span>
+        </h2>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <DataField label="Next Follow up date" value="2024-04-01" />
+              <EditField label="Next Follow up date" value="2024-04-01" type="date" onChange={() => {}} />
               <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
                 <option>Select Result</option>
                 <option>Lien Signed</option>
@@ -849,25 +1073,114 @@ const HistoryTab: React.FC = () => {
     { type: 'Field Updated', user: 'Clinic Staff', time: '1 day ago', details: 'Policy ID updated to POL-998877' },
   ];
 
+  const majorChanges = [
+    { type: 'Policy Update', timestamp: '2024-03-22 14:30', user: 'Agent Smith', description: 'Updated Policy ID from POL-123 to POL-998877' },
+    { type: 'Case Type Change', timestamp: '2024-03-21 10:15', user: 'System', description: 'Automatically changed case type to Auto Incident based on intake' },
+    { type: 'Attorney Assigned', timestamp: '2024-03-20 16:45', user: 'Clinic Staff', description: 'Assigned attorney John Wick to the case' },
+  ];
+
+  const allNotes = [
+    { datetime: '2024-03-23 09:00', content: 'Patient called to confirm appointment.', source: 'Account Summary' },
+    { datetime: '2024-03-22 11:30', content: 'Eligibility verified. Aetna PPO active.', source: 'EV' },
+    { datetime: '2024-03-21 15:20', content: 'Prior auth requested for 10 visits.', source: 'PA' },
+    { datetime: '2024-03-20 14:10', content: 'Attorney requested LOP status.', source: 'PI' },
+  ];
+
   return (
-    <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-8">
-      <h2 className="text-xl font-bold text-gray-900">Activity Log</h2>
-      <div className="space-y-6">
-        {events.map((event, i) => (
-          <div key={i} className="flex items-start space-x-4">
-            <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 shrink-0">
-              <History size={20} />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-gray-900">{event.type}</p>
-                <span className="text-[10px] font-bold text-gray-400 uppercase">{event.time}</span>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">{event.details}</p>
-              <p className="text-[10px] font-bold text-primary mt-1 uppercase tracking-tight">By: {event.user}</p>
-            </div>
+    <div className="space-y-8">
+      {/* Activity Log */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-8">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+            <History size={20} />
           </div>
-        ))}
+          <h2 className="text-xl font-bold text-gray-900">Activity Log</h2>
+        </div>
+        <div className="space-y-6">
+          {events.map((event, i) => (
+            <div key={i} className="flex items-start space-x-4">
+              <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 shrink-0">
+                <History size={20} />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-bold text-gray-900">{event.type}</p>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">{event.time}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{event.details}</p>
+                <p className="text-[10px] font-bold text-primary mt-1 uppercase tracking-tight">By: {event.user}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Major Account Changes */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500">
+            <AlertTriangle size={20} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Major Account Changes</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-gray-50">
+                <th className="px-4 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Event Type</th>
+                <th className="px-4 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Timestamp</th>
+                <th className="px-4 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">User/System</th>
+                <th className="px-4 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {majorChanges.map((change, i) => (
+                <tr key={i} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-4">
+                    <span className="text-sm font-bold text-gray-900">{change.type}</span>
+                  </td>
+                  <td className="px-4 py-4 text-xs text-gray-500">{change.timestamp}</td>
+                  <td className="px-4 py-4">
+                    <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-lg ${change.user === 'System' ? 'bg-gray-100 text-gray-500' : 'bg-primary/10 text-primary'}`}>
+                      {change.user}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 text-xs text-gray-600">{change.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* All Notes */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500">
+            <MessageSquare size={20} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">All Notes</h2>
+        </div>
+        <div className="space-y-4">
+          {allNotes.map((note, i) => (
+            <div key={i} className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                    note.source === 'EV' ? 'bg-green-100 text-green-600' :
+                    note.source === 'PA' ? 'bg-blue-100 text-blue-600' :
+                    note.source === 'PI' ? 'bg-purple-100 text-purple-600' :
+                    'bg-gray-200 text-gray-600'
+                  }`}>
+                    {note.source}
+                  </span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">{note.datetime}</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700 leading-relaxed font-medium">{note.content}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
