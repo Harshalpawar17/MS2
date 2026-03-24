@@ -39,6 +39,57 @@ interface PatientDetailProps {
   onBack: () => void;
 }
 
+const PI_CATEGORIES = [
+  'CPT code not /incorrectly entered',
+  'Billed Patient but Insurance Balance Available',
+  'Incorrectly kept under clinical assistance',
+  'Incorrectly adjusted need to bill patient',
+  'Documentation/Typing error',
+  'Incorrect claim number entered/missing',
+  'Need to call and get the claim status',
+  'Need to call and reprocess the claim',
+  'Incorrectly billed to insurance',
+  'Denial reason entered incorrectly',
+  'Balance not adjusted',
+  'Need to rebill',
+  'Amount entered incorrectly',
+  'Missed to verify documents in chirohd',
+  'Need to get the resubmitted status',
+  'Insurance name not entered',
+  'Adjuster/Attorney Details Not updated',
+  'Not Reached the correct Payer',
+  'Spreadsheet not updated',
+  'Reached Attorney before TAT'
+];
+
+const EV_CATEGORIES = [
+  'Not used the Correct Portal',
+  'COB details not captured',
+  'Not Called the Insurance',
+  'Called Insurance instead of Portal',
+  'Not Reached the correct Payer',
+  'Incorrect Deductible/OOP Info Updated',
+  'Incorrect Insurance Info Updated',
+  'Incorrect Benefits Updated',
+  'Incorrectly/Not Updated Auth',
+  'Incorrect Visit Limit Updated',
+  'Patient Demographic Error',
+  'Notes not Updated',
+  'Billing Data Entry Error',
+  'Data Entry not done',
+  'Incorrect Result Chosen',
+  'Incorrectly Moved to calling'
+];
+
+const PA_CATEGORIES = [
+  'Not used the Correct Portal',
+  'Incorrectly Moved to calling',
+  'Incorrect disposition chosen',
+  'Incorrect provider requested in auth',
+  'Incorrect auth information updated',
+  'Missed to add notes / approved documents in EHR & MYSAGE'
+];
+
 const AgentPatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack }) => {
   const [activeTab, setActiveTab] = useState('Account Summary');
   const tabs = ['Account Summary', 'PA Data', 'PI', 'History/Activity Log', 'Documents', 'QA'];
@@ -458,73 +509,84 @@ const AccountSummaryTab: React.FC<{ patient: any }> = ({ patient }) => {
         </div>
 
         {/* Form Fields - Structured Layout */}
-        <div className="space-y-6">
+        <div className="space-y-8">
           {/* Row 1: Contact for Prior Authorization */}
           <div className="grid grid-cols-1">
             <EditField label="Contact for Prior Authorization" value={evWorkingData.contactPA} onChange={(v) => setEvWorkingData({...evWorkingData, contactPA: v})} />
           </div>
 
-          {/* Row 2: Agent Name, Reference Number, PCP On File */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <EditField label="Agent Name" value={evWorkingData.agentName} onChange={(v) => setEvWorkingData({...evWorkingData, agentName: v})} />
-            <EditField label="Reference Number" value={evWorkingData.referenceNumber} onChange={(v) => setEvWorkingData({...evWorkingData, referenceNumber: v})} />
-            <EditField label="PCP On File" value={evWorkingData.pcpOnFile} onChange={(v) => setEvWorkingData({...evWorkingData, pcpOnFile: v})} />
-          </div>
-
-          {/* Row 3: Verification Type */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <SelectField label="Verification Type" value={evWorkingData.verificationType} options={['Phone', 'Online Portal', 'Fax', 'EVR']} onChange={(v) => setEvWorkingData({...evWorkingData, verificationType: v})} />
-          </div>
-        </div>
-
-        {/* Financials Section */}
-        <div className="pt-6 border-t border-gray-50 space-y-6">
-          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Financial Details</h3>
-          
-          <div className="grid grid-cols-1 gap-8">
-            {/* Individual */}
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold text-gray-500 uppercase">Individual</h4>
-              <div className="grid grid-cols-3 gap-4">
-                <EditField label="Deductible ($)" value={evWorkingData.indivDeductibleAmount} onChange={(v) => setEvWorkingData({...evWorkingData, indivDeductibleAmount: v})} />
-                <EditField label="Met ($)" value={evWorkingData.indivDeductibleMet} onChange={(v) => setEvWorkingData({...evWorkingData, indivDeductibleMet: v})} />
-                <EditField label="Remaining ($)" value={evWorkingData.indivDeductibleRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, indivDeductibleRemaining: v})} />
+          {/* Individual Section */}
+          <div className="pt-6 border-t border-gray-50 space-y-6">
+            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Individual Financials</h3>
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Deductible</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <EditField label="Amount" value={evWorkingData.indivDeductibleAmount} onChange={(v) => setEvWorkingData({...evWorkingData, indivDeductibleAmount: v})} />
+                  <EditField label="Met" value={evWorkingData.indivDeductibleMet} onChange={(v) => setEvWorkingData({...evWorkingData, indivDeductibleMet: v})} />
+                  <EditField label="Remaining" value={evWorkingData.indivDeductibleRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, indivDeductibleRemaining: v})} />
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <EditField label="OOP Max ($)" value={evWorkingData.indivOOPAmount} onChange={(v) => setEvWorkingData({...evWorkingData, indivOOPAmount: v})} />
-                <EditField label="Met ($)" value={evWorkingData.indivOOPMet} onChange={(v) => setEvWorkingData({...evWorkingData, indivOOPMet: v})} />
-                <EditField label="Remaining ($)" value={evWorkingData.indivOOPRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, indivOOPRemaining: v})} />
-              </div>
-            </div>
-
-            {/* Family */}
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold text-gray-500 uppercase">Family</h4>
-              <div className="grid grid-cols-3 gap-4">
-                <EditField label="Deductible ($)" value={evWorkingData.familyDeductibleAmount} onChange={(v) => setEvWorkingData({...evWorkingData, familyDeductibleAmount: v})} />
-                <EditField label="Met ($)" value={evWorkingData.familyDeductibleMet} onChange={(v) => setEvWorkingData({...evWorkingData, familyDeductibleMet: v})} />
-                <EditField label="Remaining ($)" value={evWorkingData.familyDeductibleRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, familyDeductibleRemaining: v})} />
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <EditField label="OOP Max ($)" value={evWorkingData.familyOOPAmount} onChange={(v) => setEvWorkingData({...evWorkingData, familyOOPAmount: v})} />
-                <EditField label="Met ($)" value={evWorkingData.familyOOPMet} onChange={(v) => setEvWorkingData({...evWorkingData, familyOOPMet: v})} />
-                <EditField label="Remaining ($)" value={evWorkingData.familyOOPRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, familyOOPRemaining: v})} />
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Out Of Pocket</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <EditField label="Amount" value={evWorkingData.indivOOPAmount} onChange={(v) => setEvWorkingData({...evWorkingData, indivOOPAmount: v})} />
+                  <EditField label="Met" value={evWorkingData.indivOOPMet} onChange={(v) => setEvWorkingData({...evWorkingData, indivOOPMet: v})} />
+                  <EditField label="Remaining" value={evWorkingData.indivOOPRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, indivOOPRemaining: v})} />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-            <div className="flex items-center space-x-2">
-              <input type="checkbox" checked={evWorkingData.oopIncludesDeductible} onChange={(e) => setEvWorkingData({...evWorkingData, oopIncludesDeductible: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
-              <span className="text-sm font-bold text-gray-700">OOP Max Includes Deductible</span>
+          {/* Family Section */}
+          <div className="pt-6 border-t border-gray-50 space-y-6">
+            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Family Financials</h3>
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Deductible</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <EditField label="Amount" value={evWorkingData.familyDeductibleAmount} onChange={(v) => setEvWorkingData({...evWorkingData, familyDeductibleAmount: v})} />
+                  <EditField label="Met" value={evWorkingData.familyDeductibleMet} onChange={(v) => setEvWorkingData({...evWorkingData, familyDeductibleMet: v})} />
+                  <EditField label="Remaining" value={evWorkingData.familyDeductibleRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, familyDeductibleRemaining: v})} />
+                </div>
+              </div>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Out Of Pocket</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <EditField label="Amount" value={evWorkingData.familyOOPAmount} onChange={(v) => setEvWorkingData({...evWorkingData, familyOOPAmount: v})} />
+                  <EditField label="Met" value={evWorkingData.familyOOPMet} onChange={(v) => setEvWorkingData({...evWorkingData, familyOOPMet: v})} />
+                  <EditField label="Remaining" value={evWorkingData.familyOOPRemaining} onChange={(v) => setEvWorkingData({...evWorkingData, familyOOPRemaining: v})} />
+                </div>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <input type="checkbox" checked={evWorkingData.deductibleCarryover} onChange={(e) => setEvWorkingData({...evWorkingData, deductibleCarryover: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
-              <span className="text-sm font-bold text-gray-700">Deductible 1/4 Carryover</span>
+          </div>
+
+          {/* Checkbox Row */}
+          <div className="pt-6 border-t border-gray-50">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="flex items-center space-x-2">
+                <input type="checkbox" checked={evWorkingData.oopIncludesDeductible} onChange={(e) => setEvWorkingData({...evWorkingData, oopIncludesDeductible: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
+                <span className="text-sm font-bold text-gray-700">OOP Max Includes Deductible</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <input type="checkbox" checked={evWorkingData.deductibleCarryover} onChange={(e) => setEvWorkingData({...evWorkingData, deductibleCarryover: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
+                <span className="text-sm font-bold text-gray-700">Deductible 1/4 Carryover</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <input type="checkbox" checked={evWorkingData.onlyOneCopay} onChange={(e) => setEvWorkingData({...evWorkingData, onlyOneCopay: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
+                <span className="text-sm font-bold text-gray-700">Only One Copay (Largest)</span>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <input type="checkbox" checked={evWorkingData.onlyOneCopay} onChange={(e) => setEvWorkingData({...evWorkingData, onlyOneCopay: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
-              <span className="text-sm font-bold text-gray-700">Only One Copay (Largest)</span>
+          </div>
+
+          {/* Verification Details Section */}
+          <div className="pt-6 border-t border-gray-50 space-y-6">
+            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Verification Details</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <EditField label="Agent Name" value={evWorkingData.agentName} onChange={(v) => setEvWorkingData({...evWorkingData, agentName: v})} />
+              <EditField label="Reference Number" value={evWorkingData.referenceNumber} onChange={(v) => setEvWorkingData({...evWorkingData, referenceNumber: v})} />
+              <SelectField label="Verification Type" value={evWorkingData.verificationType} options={['Phone', 'Online Portal', 'Fax', 'EVR']} onChange={(v) => setEvWorkingData({...evWorkingData, verificationType: v})} />
+              <EditField label="PCP On File" value={evWorkingData.pcpOnFile} onChange={(v) => setEvWorkingData({...evWorkingData, pcpOnFile: v})} />
             </div>
           </div>
         </div>
@@ -645,18 +707,23 @@ const AccountSummaryTab: React.FC<{ patient: any }> = ({ patient }) => {
         </div>
       </div>
 
-      {/* Complete Task Section - Moved to Bottom */}
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
-          <CheckSquare size={20} className="text-primary" />
-          <span>Complete Task</span>
-        </h2>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {/* Task Completion & QA Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Complete Task Section */}
+        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+            <CheckSquare size={20} className="text-primary" />
+            <span>Complete Task</span>
+          </h2>
+          
           <div className="space-y-6">
             <div>
               <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
-                <option>Select</option>
+                <option>Select Result</option>
+                <option>Verified - Active</option>
+                <option>Verified - Inactive</option>
+                <option>COB Update Needed</option>
+                <option>Call Insurance</option>
               </select>
             </div>
 
@@ -667,10 +734,8 @@ const AccountSummaryTab: React.FC<{ patient: any }> = ({ patient }) => {
                 placeholder="Enter your notes here..."
               />
             </div>
-          </div>
 
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row items-center gap-4 pt-4">
+            <div className="flex flex-col sm:flex-row items-center gap-4">
               <button 
                 onClick={() => setIsNotesModalOpen(true)}
                 className="w-full sm:w-auto px-8 py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-200 transition-colors"
@@ -680,6 +745,32 @@ const AccountSummaryTab: React.FC<{ patient: any }> = ({ patient }) => {
               <button className="w-full sm:w-auto px-8 py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.01] transition-transform">
                 Complete Task
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* QA Section */}
+        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+            <CheckCircle2 size={20} className="text-emerald-500" />
+            <span>QA</span>
+          </h2>
+          
+          <div className="space-y-6">
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">QA Category</label>
+              <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
+                <option value="">Select QA Category</option>
+                {EV_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">QA Notes / Corrective Notes</label>
+              <textarea 
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-medium text-sm min-h-[120px]"
+                placeholder="Enter corrective notes if needed..."
+              />
             </div>
           </div>
         </div>
@@ -821,17 +912,23 @@ const PADataTab: React.FC<{ patient: any }> = ({ patient }) => {
         </div>
       </div>
       
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
-          <CheckSquare size={20} className="text-primary" />
-          <span>Complete PA Task</span>
-        </h2>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {/* Task Completion & QA Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Complete PA Task Section */}
+        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+            <CheckSquare size={20} className="text-primary" />
+            <span>Complete PA Task</span>
+          </h2>
+          
           <div className="space-y-6">
             <div>
               <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
-                <option>Select</option>
+                <option>Select Result</option>
+                <option>Auth Approved</option>
+                <option>Auth Denied</option>
+                <option>Pending - More Info</option>
+                <option>Call Payer</option>
               </select>
             </div>
 
@@ -842,10 +939,8 @@ const PADataTab: React.FC<{ patient: any }> = ({ patient }) => {
                 placeholder="Enter your notes here..."
               />
             </div>
-          </div>
 
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row items-center gap-4 pt-4">
+            <div className="flex flex-col sm:flex-row items-center gap-4">
               <button 
                 onClick={() => setIsNotesModalOpen(true)}
                 className="w-full sm:w-auto px-8 py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-200 transition-colors"
@@ -855,6 +950,32 @@ const PADataTab: React.FC<{ patient: any }> = ({ patient }) => {
               <button className="w-full sm:w-auto px-8 py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.01] transition-transform">
                 Complete Task
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* QA Section */}
+        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+            <CheckCircle2 size={20} className="text-emerald-500" />
+            <span>QA</span>
+          </h2>
+          
+          <div className="space-y-6">
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">QA Category</label>
+              <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
+                <option value="">Select QA Category</option>
+                {PA_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">QA Notes / Corrective Notes</label>
+              <textarea 
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-medium text-sm min-h-[120px]"
+                placeholder="Enter corrective notes if needed..."
+              />
             </div>
           </div>
         </div>
@@ -1010,18 +1131,15 @@ const PITab: React.FC<{ patient: any }> = ({ patient }) => {
             <EditField label="Adjuster Email" value={piData.adjusterEmail} onChange={(v) => setPiData({...piData, adjusterEmail: v})} />
           </div>
         </div>
-      </div>
 
-      {/* Case Manager */}
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
-          <User size={20} className="text-primary" />
-          <span>Case Manager</span>
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <EditField label="Name" value={piData.caseManagerName} onChange={(v) => setPiData({...piData, caseManagerName: v})} />
-          <EditField label="Email" value={piData.caseManagerEmail} onChange={(v) => setPiData({...piData, caseManagerEmail: v})} />
-          <EditField label="Primary Contact" value={piData.caseManagerContact} onChange={(v) => setPiData({...piData, caseManagerContact: v})} />
+        {/* Case Manager Information */}
+        <div className="pt-6 border-t border-gray-50 space-y-4">
+          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">Case Manager Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <EditField label="Name" value={piData.caseManagerName} onChange={(v) => setPiData({...piData, caseManagerName: v})} />
+            <EditField label="Email" value={piData.caseManagerEmail} onChange={(v) => setPiData({...piData, caseManagerEmail: v})} />
+            <EditField label="Primary Contact" value={piData.caseManagerContact} onChange={(v) => setPiData({...piData, caseManagerContact: v})} />
+          </div>
         </div>
       </div>
 
@@ -1088,26 +1206,6 @@ const PITab: React.FC<{ patient: any }> = ({ patient }) => {
             </div>
           </div>
 
-          {isLopSent && (
-            <div className="p-6 bg-gray-50/50 border border-gray-100 rounded-3xl space-y-6 animate-in slide-in-from-top-2 duration-300">
-              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest">LOP Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <EditField label="Last DOS" value={piData.lastDos} type="date" onChange={(v) => setPiData({...piData, lastDos: v})} />
-                <EditField label="Last Payment Date" value={piData.lastPaymentDate} type="date" onChange={(v) => setPiData({...piData, lastPaymentDate: v})} />
-                <EditField label="Total Charges" value={piData.totalCharges} onChange={(v) => setPiData({...piData, totalCharges: v})} />
-                <EditField label="Paid to Date" value={piData.paidToDate} onChange={(v) => setPiData({...piData, paidToDate: v})} />
-                <EditField label="Account Balance" value={piData.accountBalance} onChange={(v) => setPiData({...piData, accountBalance: v})} />
-                <EditField label="Last Payment" value={piData.lastPayment} onChange={(v) => setPiData({...piData, lastPayment: v})} />
-                <SelectField 
-                  label="Last Payment Method" 
-                  value={piData.lastPaymentMethod} 
-                  options={['Cash', 'Check', 'Card', 'ACH', 'Wire', 'Other']} 
-                  onChange={(v) => setPiData({...piData, lastPaymentMethod: v})} 
-                />
-              </div>
-            </div>
-          )}
-
           <div className="p-4 bg-gray-50 rounded-2xl">
             <p className="text-sm font-bold text-gray-700">Does the patient have medical insurance?</p>
             <div className="flex items-center space-x-4 mt-2">
@@ -1140,24 +1238,58 @@ const PITab: React.FC<{ patient: any }> = ({ patient }) => {
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
-          <CheckSquare size={20} className="text-primary" />
-          <span>Complete PI Task</span>
-        </h2>
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
+      {/* Task Completion & QA Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Complete PI Task Section */}
+        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+            <CheckSquare size={20} className="text-primary" />
+            <span>Complete PI Task</span>
+          </h2>
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <EditField label="Next Follow up date" value="2024-04-01" type="date" onChange={() => {}} />
-              <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
-                <option>Select Result</option>
-                <option>Lien Signed</option>
-                <option>Pending Attorney</option>
-              </select>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Result</label>
+                <select className="w-full px-4 py-2 bg-gray-50 rounded-xl border-none outline-none font-bold text-sm">
+                  <option>Select Result</option>
+                  <option>Lien Signed</option>
+                  <option>Pending Attorney</option>
+                  <option>Reprocess Needed</option>
+                </select>
+              </div>
             </div>
             <textarea className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-medium text-sm min-h-[100px]" placeholder="Notes..." />
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+              <button className="w-full py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.01] transition-transform">Complete Task</button>
+            </div>
           </div>
-          <button className="w-full py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-primary/20">Complete Task</button>
+        </div>
+
+        {/* QA Section */}
+        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+          <h2 className="text-xl font-bold text-gray-900 flex items-center space-x-2">
+            <CheckCircle2 size={20} className="text-emerald-500" />
+            <span>QA</span>
+          </h2>
+          
+          <div className="space-y-6">
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">QA Category</label>
+              <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
+                <option value="">Select QA Category</option>
+                {PI_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">QA Notes / Corrective Notes</label>
+              <textarea 
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-medium text-sm min-h-[120px]"
+                placeholder="Enter corrective notes if needed..."
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1209,6 +1341,33 @@ const HistoryTab: React.FC = () => {
                 <p className="text-xs text-gray-500 mt-1">{event.details}</p>
                 <p className="text-[10px] font-bold text-primary mt-1 uppercase tracking-tight">By: {event.user}</p>
               </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* EV & PA Summary Notes */}
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-green-50 rounded-2xl flex items-center justify-center text-green-600">
+            <FileText size={20} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">EV & PA Summary Notes</h2>
+        </div>
+        <div className="space-y-4">
+          {allNotes.filter(note => note.source === 'EV' || note.source === 'PA').map((note, i) => (
+            <div key={i} className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                    note.source === 'EV' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
+                  }`}>
+                    {note.source}
+                  </span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">{note.datetime}</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700 leading-relaxed font-medium">{note.content}</p>
             </div>
           ))}
         </div>
@@ -1324,7 +1483,13 @@ const DocumentsTab: React.FC = () => {
                       <span className="text-sm font-bold text-gray-900">{doc.name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-xs text-gray-500">{doc.date}</td>
+                  <td className="px-4 py-4 text-xs text-gray-500">
+                    {(() => {
+                      if (!doc.date || !doc.date.includes('-')) return doc.date;
+                      const [y, m, d] = doc.date.split('-');
+                      return `${m}-${d}-${y}`;
+                    })()}
+                  </td>
                   <td className="px-4 py-4 text-xs font-bold text-gray-700">{doc.workflow}</td>
                   <td className="px-4 py-4 text-xs text-gray-500">{doc.source}</td>
                   <td className="px-4 py-4 text-xs text-gray-500">{doc.user}</td>
@@ -1353,41 +1518,106 @@ const QATab: React.FC = () => {
     { id: 5, question: 'Is Network status confirmed?', status: null },
   ]);
 
+  const [qaType, setQaType] = useState<'EV' | 'PA' | 'PI'>('EV');
+  const [errorCategory, setErrorCategory] = useState('');
+  const [correctiveAction, setCorrectiveAction] = useState('');
+
+  const handleStatusChange = (id: number, status: boolean) => {
+    setChecklist(prev => prev.map(item => item.id === id ? { ...item, status } : item));
+  };
+
+  const failedItems = checklist.filter(item => item.status === false);
+  const qaSummary = failedItems.length > 0 
+    ? `Flagged Issues: ${failedItems.map(item => item.question).join('; ')}`
+    : 'All checklist items passed.';
+
   return (
     <div className="space-y-8">
       <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900">QA Validation Checklist</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-gray-900">QA Validation Checklist</h2>
+          <div className="flex bg-gray-100 p-1 rounded-xl">
+            {(['EV', 'PA', 'PI'] as const).map(type => (
+              <button
+                key={type}
+                onClick={() => setQaType(type)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${qaType === type ? 'bg-white text-primary shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="space-y-4">
           {checklist.map((item) => (
             <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
               <span className="text-sm font-bold text-gray-700">{item.question}</span>
               <div className="flex items-center space-x-2">
-                <button className="px-4 py-1.5 bg-white border border-gray-200 text-gray-400 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 transition-all">Yes</button>
-                <button className="px-4 py-1.5 bg-white border border-gray-200 text-gray-400 rounded-lg text-xs font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all">No</button>
+                <button 
+                  onClick={() => handleStatusChange(item.id, true)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${item.status === true ? 'bg-emerald-500 text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600'}`}
+                >
+                  Yes
+                </button>
+                <button 
+                  onClick={() => handleStatusChange(item.id, false)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${item.status === false ? 'bg-red-500 text-white shadow-md' : 'bg-white border border-gray-200 text-gray-400 hover:bg-red-50 hover:text-red-600'}`}
+                >
+                  No
+                </button>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-6">
-        <h2 className="text-xl font-bold text-gray-900">QA Result</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">Error Category</label>
-            <select className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm">
-              <option>No Error</option>
-              <option>Data Entry Error</option>
-              <option>Missing Information</option>
-              <option>Incorrect Verification</option>
-            </select>
+      <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm space-y-8">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+            <CheckCircle2 size={20} />
           </div>
-          <div>
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">Final Notes</label>
-            <textarea className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-medium text-sm min-h-[100px]" placeholder="Corrective steps..." />
+          <h2 className="text-xl font-bold text-gray-900">Final QA Conclusion</h2>
+        </div>
+
+        <div className="space-y-6">
+          <div className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-4">
+            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">QA Summary</h3>
+            <div className="p-4 bg-white rounded-2xl border border-gray-100">
+              <p className="text-sm font-medium text-gray-700 leading-relaxed">
+                {qaSummary}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">Error Category</label>
+              <select 
+                value={errorCategory}
+                onChange={(e) => setErrorCategory(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-bold text-sm focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="">Select Error Category</option>
+                {qaType === 'EV' && EV_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                {qaType === 'PA' && PA_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                {qaType === 'PI' && PI_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">Corrective Action</label>
+              <textarea 
+                value={correctiveAction}
+                onChange={(e) => setCorrectiveAction(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 rounded-2xl border-none outline-none font-medium text-sm min-h-[100px] focus:ring-2 focus:ring-primary/20" 
+                placeholder="Final action/next-step..." 
+              />
+            </div>
           </div>
         </div>
-        <button className="w-full py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-primary/20">Submit QA</button>
+
+        <button className="w-full py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.01] transition-transform">
+          Submit Final QA
+        </button>
       </div>
     </div>
   );
