@@ -26,6 +26,7 @@ import ClinicIntakeConfigView from "./views/ClinicIntakeConfig";
 import AgentDashboard from './views/AgentDashboard';
 import AgentWorkList from './views/AgentWorkList';
 import AgentPatientDetail from './views/AgentPatientDetail';
+import AdminPatientListing from './views/AdminPatientListing';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -86,6 +87,7 @@ const App: React.FC = () => {
           <Route path="admin/workflow-engine" element={<WorkflowEngineView />} />
           <Route path="admin/users" element={<UserManagement />} />
           <Route path="admin/pods" element={<PodManagement />} />
+          <Route path="admin/patients" element={<AdminPatientListing />} />
           <Route path="admin/ClinicIntakeConfig" element={<ClinicIntakeConfigView />} />
           <Route path="/agent" element={<AgentDashboard />} />
           <Route path="/agent/work-list" element={<AgentWorkList />} />

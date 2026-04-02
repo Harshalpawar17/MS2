@@ -1,17 +1,16 @@
-
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  FilePlus, 
-  Settings, 
-  LogOut, 
-  Building2, 
+import {
+  LayoutDashboard,
+  FilePlus,
+  Settings,
+  LogOut,
+  Building2,
   UserCircle,
   ClipboardList,
   Cpu,
   Users,
-  Layout as LayoutIcon
+  Layout as LayoutIcon,
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 
@@ -22,7 +21,7 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
   const navigate = useNavigate();
-  
+
   const handleLogoutClick = () => {
     onLogout();
     navigate('/');
@@ -38,11 +37,16 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
     { to: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
     { to: '/intake', icon: <FilePlus size={20} />, label: 'Select Intake' },
     { to: '/submissions', icon: <ClipboardList size={20} />, label: 'My Submissions' },
-    { to: '/clinic/config', icon: <Settings size={20} />, label: 'Insurance Verification Intake Configuration' },
+    {
+      to: '/clinic/config',
+      icon: <Settings size={20} />,
+      label: 'Insurance Verification Intake Configuration',
+    },
   ];
 
   const adminLinks = [
     { to: '/', icon: <LayoutDashboard size={20} />, label: 'Admin Metrics' },
+    { to: '/admin/patients', icon: <ClipboardList size={20} />, label: 'Patient Listing' },
     { to: '/admin/users', icon: <Users size={20} />, label: 'User Management' },
     { to: '/admin/pods', icon: <LayoutIcon size={20} />, label: 'POD Management' },
     { to: '/admin/add-clinic', icon: <Building2 size={20} />, label: 'Add Clinic' },
@@ -56,40 +60,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
     { to: '/agent/work-list', icon: <ClipboardList size={20} />, label: 'Work List' },
   ];
 
-  // For Patients, we use a different layout entirely
-  if (user.role === UserRole.PATIENT) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-100 p-6 flex items-center justify-between sticky top-0 z-50">
-          <div className="flex items-center space-x-4">
-            <img 
-              src="without leaf.png" 
-              alt="MySage" 
-              className="h-8 object-contain"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = "https://placehold.co/100x40/ffffff/6D6E71?text=MySage";
-              }}
-            />
-            <div className="h-6 w-px bg-gray-200"></div>
-            <span className="text-secondary font-bold text-sm">Patient Portal</span>
-          </div>
-          <button 
-            onClick={handleLogoutClick}
-            className="flex items-center space-x-2 text-secondary hover:text-red-600 transition-colors font-bold text-xs uppercase tracking-widest"
-          >
-            <LogOut size={16} />
-            <span>Sign Out</span>
-          </button>
-        </header>
-        <main className="flex-1 p-6 md:p-12 overflow-y-auto">
-          <div className="max-w-3xl mx-auto">
-            <Outlet />
-          </div>
-        </main>
-      </div>
-    );
-  }
-
   const getLinks = () => {
     if (user.role === UserRole.ADMIN) return adminLinks;
     if (user.role === UserRole.CLINIC_ADMIN) return clinicAdminLinks;
@@ -97,56 +67,109 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
     return clinicLinks;
   };
 
+  const getNavLinkClasses = (isActive: boolean) =>
+    [
+      'flex items-center space-x-3 rounded-xl px-4 py-3 transition-all duration-300',
+      isActive
+        ? 'bg-primary text-white shadow-lg shadow-primary/20 dark:bg-primary dark:text-white dark:shadow-primary/10'
+        : 'text-secondary hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white',
+    ].join(' ');
+
+  const getNavIconClasses = (isActive: boolean) =>
+    isActive ? 'text-white' : 'text-primary dark:text-primary';
+
+  if (user.role === UserRole.PATIENT) {
+    return (
+      <div className="min-h-screen bg-[#f4f6f8] text-slate-900 transition-colors duration-300 dark:bg-[#020817] dark:text-white">
+        <header className="sticky top-0 z-50 flex items-center justify-between border-b border-slate-200 bg-white/95 p-6 backdrop-blur transition-colors duration-300 dark:border-slate-800 dark:bg-[#0b1220]/95">
+          <div className="flex items-center space-x-4">
+            <div>
+              <img
+                src="sage_healthy_rcm_logo.png"
+                alt="MySage"
+                className="h-12 w-auto object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    'https://placehold.co/100x40/ffffff/6D6E71?text=MySage';
+                }}
+              />
+            </div>
+            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700"></div>
+            <span className="text-sm font-bold text-secondary dark:text-slate-300">
+              Patient Portal
+            </span>
+          </div>
+
+          <button
+            onClick={handleLogoutClick}
+            className="flex items-center space-x-2 rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-widest text-secondary transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+          >
+            <LogOut size={16} />
+            <span>Sign Out</span>
+          </button>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-6 md:p-12">
+          <div className="mx-auto max-w-3xl">
+            <Outlet />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
-        <div className="p-6 border-b border-gray-100 flex items-center justify-center">
-          <img 
-            src="sage_healthy_rcm_logo.png" 
-            alt="MySage" 
-            className="h-12 object-contain"
+    <div className="flex h-screen overflow-hidden bg-[#f4f6f8] text-slate-900 transition-colors duration-300 dark:bg-[#020817] dark:text-white">
+      <aside className="flex w-64 flex-shrink-0 flex-col border-r border-slate-200 bg-[#f8fafc] transition-colors duration-300 dark:border-slate-800 dark:bg-[#0b1220]">
+        <div className="flex items-center justify-center border-b border-slate-200 p-6 transition-colors duration-300 dark:border-slate-800">
+          <img
+            src="sage_healthy_rcm_logo.png"
+            alt="MySage"
+            className="h-12 w-auto object-contain"
             onError={(e) => {
-              (e.target as HTMLImageElement).src = "https://placehold.co/200x60/ffffff/6D6E71?text=MySage";
+              (e.target as HTMLImageElement).src =
+                'https://placehold.co/200x60/ffffff/6D6E71?text=MySage';
             }}
           />
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 space-y-1 p-4">
           {getLinks().map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
-              className={({ isActive }) => 
-                `flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
-                  isActive 
-                    ? 'bg-primary text-white shadow-lg shadow-primary/20' 
-                    : 'text-secondary hover:bg-gray-100 font-medium'
-                }`
-              }
+              end={link.to === '/'}
+              className={({ isActive }) => getNavLinkClasses(isActive)}
             >
               {({ isActive }) => (
                 <>
-                  <div className={isActive ? 'text-white' : 'text-primary'}>{link.icon}</div>
-                  <span>{link.label}</span>
+                  <div className={getNavIconClasses(isActive)}>{link.icon}</div>
+                  <span className="font-medium">{link.label}</span>
                 </>
               )}
             </NavLink>
           ))}
         </nav>
 
-        <div className="p-4 border-t border-gray-100">
-          <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-2xl mb-3">
-            <div className="bg-primary/10 p-2 rounded-xl">
+        <div className="border-t border-slate-200 p-4 transition-colors duration-300 dark:border-slate-800">
+          <div className="mb-3 flex items-center space-x-3 rounded-2xl border border-slate-200 bg-white p-3 transition-colors duration-300 dark:border-slate-800 dark:bg-slate-900">
+            <div className="rounded-xl bg-primary/10 p-2 dark:bg-primary/15">
               <UserCircle size={24} className="text-primary" />
             </div>
+
             <div className="flex-1 overflow-hidden">
-              <p className="text-sm font-bold text-primaryText truncate">{user.name}</p>
-              <p className="text-[10px] font-bold text-secondary uppercase tracking-tight truncate">{user.role}</p>
+              <p className="truncate text-sm font-bold text-primaryText dark:text-white">
+                {user.name}
+              </p>
+              <p className="truncate text-[10px] font-bold uppercase tracking-tight text-secondary dark:text-slate-400">
+                {user.role}
+              </p>
             </div>
           </div>
-          <button 
+
+          <button
             onClick={handleLogoutClick}
-            className="flex items-center space-x-3 w-full px-4 py-3 text-secondary hover:text-red-600 hover:bg-red-50 rounded-xl transition-all font-bold text-sm"
+            className="flex w-full items-center space-x-3 rounded-xl px-4 py-3 text-sm font-bold text-secondary transition-all duration-300 hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/10 dark:hover:text-red-400"
           >
             <LogOut size={20} />
             <span>Logout</span>
@@ -154,8 +177,8 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout }) => {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-7xl mx-auto p-10">
+      <main className="flex-1 overflow-y-auto bg-transparent">
+        <div className="mx-auto max-w-7xl p-10">
           <Outlet />
         </div>
       </main>

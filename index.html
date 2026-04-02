@@ -10,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
+        darkMode: 'class',
         theme: {
           extend: {
             colors: {
@@ -22,6 +23,20 @@
         }
       }
     </script>
+
+    <script>
+      (() => {
+        const savedTheme = localStorage.getItem('ms2-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
+
     <style>
         body { font-family: 'Inter', sans-serif; color: #1F2937; }
         .bg-primary { background-color: #8bc53d; }
@@ -51,7 +66,8 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-<body class="bg-gray-50">
+<!-- <body class="bg-gray-50"> -->
+<body class="bg-gray-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-white"></body>
     <div id="root"></div>
 <script type="module" src="/index.tsx"></script>
 </body>
